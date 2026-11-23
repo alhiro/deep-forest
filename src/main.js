@@ -15,13 +15,13 @@ import { ForestAudio } from './audio.js';
 // ---------- detail levels ----------
 const LEVELS = {
   low:    { treeCell: 7.6, grass: 0.22, ferns: 0.05, bushes: 700,  rocks: 300, logs: 40, shadow: 1024, shadowRange: 40, coverDist: 48, pr: 1,    post: false, lodDist: 0,  treeFar: 115, segs: 220, shafts: 26, dust: 500,  foxes: 3, horses: 4, birds: 2, butterflies: 30 },
-  medium: { treeCell: 6.4, grass: 0.5,  ferns: 0.1,  bushes: 1300, rocks: 450, logs: 60, shadow: 2048, shadowRange: 56, coverDist: 66, pr: 1.5,  post: true,  lodDist: 30, treeFar: 135, segs: 320, shafts: 46, dust: 1200, foxes: 5, horses: 5, birds: 3, butterflies: 60 },
+  medium: { treeCell: 6.4, grass: 0.5,  ferns: 0.1,  bushes: 1300, rocks: 450, logs: 60, shadow: 2048, shadowRange: 56, coverDist: 66, pr: 1.25, post: true,  lodDist: 30, treeFar: 135, segs: 320, shafts: 46, dust: 1200, foxes: 5, horses: 5, birds: 3, butterflies: 60 },
   high:   { treeCell: 5.6, grass: 0.9,  ferns: 0.16, bushes: 2000, rocks: 600, logs: 80, shadow: 4096, shadowRange: 62, coverDist: 86, pr: 2,    post: true,  lodDist: 44, treeFar: 155, segs: 420, shafts: 70, dust: 2200, foxes: 6, horses: 7, birds: 4, butterflies: 90 },
 };
 const params = new URLSearchParams(location.search);
 const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
 const coarse = matchMedia('(pointer: coarse)').matches;
-const guess = coarse ? 'low' : 'medium';
+const guess = 'low';     // Low already uses the real trees and textures and holds 60 fps on an Apple M1
 const level = LEVELS[params.get('q')] ? params.get('q') : LEVELS[store.get('forest.detail')] ? store.get('forest.detail') : guess;
 const Q = LEVELS[level];
 
@@ -46,7 +46,7 @@ async function boot() {
   const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.12, 1000);
   let composer = null;
   if (Q.post) {
-    const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: 4 });
+    const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: level === 'high' ? 4 : 2 });
     composer = new EffectComposer(renderer, rt);
     composer.addPass(new RenderPass(scene, camera));
     composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.2, 0.7, 0.92));
