@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Deep Forest</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Cpath d=%27M8 1 3 9h3l-3 4h4v2h2v-2h4l-3-4h3z%27 fill=%27%234f8a3a%27/%3E%3C/svg%3E">
+<meta name="description" content="Walk through a procedurally grown old forest with foxes, wild horses and birds. Runs in the browser.">
+<style>
+  :root { --ink:#eef3e6; --dim:#b9c7ad; --leaf:#b7d77a; --bark:#0d140c; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:#0b110a; overflow:hidden; color:var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
+  canvas#view { position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none; transition: filter .9s ease; }
+  body.menu canvas#view { filter: blur(7px) brightness(.62) saturate(.9); }
+  #menu { position:fixed; inset:0; display:none; align-items:center; justify-content:center; padding:24px;
+    background: radial-gradient(ellipse at 50% 40%, rgba(10,18,9,.15), rgba(6,10,5,.72)); }
+  body.menu #menu { display:flex; }
+  .card { width:min(560px, 100%); text-align:center; }
+  h1 { font-weight:400; font-size:clamp(44px, 9vw, 84px); letter-spacing:.02em; margin:0; line-height:1; text-wrap:balance;
+    text-shadow:0 2px 30px rgba(0,0,0,.5); }
+  h1 em { font-style:italic; color:var(--leaf); }
+  p.lede { color:var(--dim); font-size:18px; line-height:1.5; margin:18px auto 30px; max-width:30em; text-wrap:pretty; }
+  button { font:inherit; color:inherit; cursor:pointer; }
+  #enter { background:var(--leaf); color:#10200a; border:0; border-radius:999px; padding:15px 40px; font-size:20px;
+    letter-spacing:.03em; transition: transform .2s ease, background .2s ease; }
+  #enter:hover { transform: translateY(-1px); background:#c9e690; }
+  #enter:focus-visible, .seg button:focus-visible { outline:2px solid #fff; outline-offset:3px; }
+  #enter[disabled] { background:transparent; color:var(--dim); cursor:default; transform:none; }
+  #bar { height:2px; width:220px; margin:20px auto 0; background:rgba(255,255,255,.14); border-radius:2px; overflow:hidden; }
+  #bar i { display:block; height:100%; width:0; background:var(--leaf); transition: width .25s ease; }
+  .row { margin-top:30px; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size:13px; color:var(--dim); }
+  .seg { display:inline-flex; margin-left:10px; border:1px solid rgba(255,255,255,.22); border-radius:999px; overflow:hidden; }
+  .seg button { background:transparent; border:0; padding:7px 15px; font-size:13px; color:var(--dim); }
+  .seg button[aria-pressed="true"] { background:rgba(255,255,255,.16); color:var(--ink); }
+  dl { display:grid; grid-template-columns:auto auto; gap:6px 18px; justify-content:center; margin:22px 0 0; text-align:left;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size:13px; color:var(--dim); }
+  dt { color:var(--ink); font-variant-numeric: tabular-nums; } dd { margin:0; }
+  .touch { display:none; }
+  @media (pointer: coarse) { dl { display:none; } .touch { display:block; } }
+  #note { margin-top:22px; font-family: ui-sans-serif, system-ui, sans-serif; font-size:12px; color:#8fa083; }
+  #note a { color:inherit; }
+  #stats { position:fixed; left:12px; top:10px; font:12px/1.5 ui-monospace, Menlo, Consolas, monospace; color:#e8f0dc;
+    background:rgba(8,14,7,.55); padding:8px 10px; border-radius:6px; display:none; white-space:pre; pointer-events:none; }
+  #place { position:fixed; left:50%; bottom:34px; transform:translateX(-50%); font-size:22px; font-style:italic; letter-spacing:.04em;
+    opacity:0; transition: opacity 1s ease; text-shadow:0 1px 14px rgba(0,0,0,.7); pointer-events:none; }
+  body.menu #place { opacity:0 !important; }
+  #fail { display:none; color:#ffd9c9; margin-top:18px; font-family: ui-sans-serif, system-ui, sans-serif; font-size:14px; }
+  @media (prefers-reduced-motion: reduce) { canvas#view, #enter, #bar i, #place { transition:none; } }
+</style>
+  <script type="module" crossorigin src="./assets/index-TqS0wFOq.js"></script>
+</head>
+<body class="menu">
+<canvas id="view"></canvas>
+<div id="menu">
+  <div class="card">
+    <h1>Deep <em>Forest</em></h1>
+    <p class="lede">A quiet walk among old trees. The foxes keep their distance, and the wild horses do not wait for anyone.</p>
+    <button id="enter" disabled>Growing the forest…</button>
+    <div id="bar"><i></i></div>
+    <div id="fail"></div>
+    <div class="row">Detail
+      <span class="seg" id="quality">
+        <button data-q="low">Low</button><button data-q="medium">Medium</button><button data-q="high">High</button>
+      </span>
+    </div>
+    <dl>
+      <dt>W A S D</dt><dd>walk</dd>
+      <dt>Mouse</dt><dd>look around</dd>
+      <dt>Shift</dt><dd>run</dd>
+      <dt>Space</dt><dd>hop</dd>
+      <dt>1 – 6</dt><dd>jump to a place</dd>
+      <dt>M · H · Esc</dt><dd>mute · stats · menu</dd>
+    </dl>
+    <p class="row touch">Hold to walk forward · slide to look · second finger to run</p>
+    <p id="note">Trees, plants, ground, sky and sound are generated in your browser. Animal models: Fox (PixelMannen, tomkranis, CC0 / CC BY 4.0), Horse, Stork and Parrot (mirada / ro.me, via three.js).</p>
+  </div>
+</div>
+<div id="stats"></div>
+<div id="place"></div>
+</body>
+</html>
