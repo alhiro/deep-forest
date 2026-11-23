@@ -1,17 +1,23 @@
 // Trees, undergrowth, rocks and logs. Everything is built from code and instanced.
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { Tree } from './eztree/index.js';
+import { TreePreset } from './eztree/presets.js';
+import { getBarkTexture, getLeafTexture } from './eztree/textures.js';
 import { rng, fbm, lerp, smoothstep } from './noise.js';
 import { heightAt, forestDensity, coniferness, clearingFactor, CLEARING, POND, HALF } from './terrain.js';
 
 export const windTime = { value: 0 };
+export const sunView = { value: new THREE.Vector3(0, 1, 0) };   // sun direction in view space, set every frame
 const UP = new THREE.Vector3(0, 1, 0);
 
 // ---------- shader patches ----------
 function patchWind(mat, { sway, flutter, mode, fade = 0 }) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = windTime;
-    const h = mode === 'tree' ? 'pow(clamp(transformed.y / 20.0, 0.0, 1.0), 1.5)' : 'uv.y * uv.y';
+    const h = mode === 'tree' ? 'pow(clamp(transformed.y / 20.0, 0.0, 1.0), 1.5) + uv.y * 0.12' : 'uv.y * uv.y';
     sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
       #ifdef USE_INSTANCING
         vec4 wp_ = modelMatrix * instanceMatrix * vec4(transformed, 1.0);
@@ -25,8 +31,10 @@ function patchWind(mat, { sway, flutter, mode, fade = 0 }) {
       transformed.z += (sw_ * ${(sway * 0.6).toFixed(3)} - fl_ * ${flutter.toFixed(3)}) * hf_;
       ${fade ? `transformed.y *= 1.0 - smoothstep(${(fade * 0.7).toFixed(1)}, ${fade.toFixed(1)}, distance(wp_.xyz, cameraPosition));` : ''}`);
     // cards use hand-made soft normals: do not flip them on back faces
-    sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>',
-      THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''));
+    sh.uniforms.uSunView = sunView;
+    sh.fragmentShader = 'uniform vec3 uSunView;\n' + sh.fragmentShader.replace('#include <normal_fragment_begin>',
+      THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', '') + `
+      ${mode === 'tree' ? 'if (dot(normal, uSunView) < 0.0) normal = -normal; normal = normalize(mix(normal, uSunView, 0.3));' : ''}`);
   };
   mat.customProgramCacheKey = () => `wind-${mode}-${sway}-${flutter}-${fade}`;
   return mat;
@@ -96,103 +104,46 @@ class Cards {
 }
 const randDir = (r) => { const y = r() * 2 - 1, a = r() * 6.283, s = Math.sqrt(1 - y * y); return new THREE.Vector3(Math.cos(a) * s, y, Math.sin(a) * s); };
 
-function crownCards(cards, r, center, radii, count, size) {
-  for (let i = 0; i < count; i++) {
-    const d = randDir(r); d.y = d.y * 0.75 + 0.2; d.normalize();
-    const k = 0.5 + 0.5 * Math.sqrt(r());
-    const c = new THREE.Vector3(center.x + d.x * radii.x * k, center.y + d.y * radii.y * k, center.z + d.z * radii.z * k);
-    const face = randDir(r), right = new THREE.Vector3().crossVectors(face, UP);
-    if (right.lengthSq() < 0.01) right.set(1, 0, 0);
-    right.normalize();
-    const up = new THREE.Vector3().crossVectors(right, face).normalize();
-    const s = size * (0.8 + r() * 0.45) * 0.5;
-    const n = new THREE.Vector3(d.x, d.y + 0.35, d.z).normalize();
-    cards.add(c, right.multiplyScalar(s), up.multiplyScalar(s), n);
+// A real branching tree from the ez-tree generator, scaled to a height in metres.
+// `lod` 0 is full detail; 1 is a light version for trees seen through the mist.
+function growTree(preset, seed, lod, height) {
+  const tree = new Tree(), o = tree.options;
+  o.copy(structuredClone(TreePreset[preset]));
+  o.seed = seed;
+  const L = o.branch.levels;
+  if (lod === 0) {            // near: full trunk, slightly leaner twigs
+    for (const k of [1, 2, 3]) { o.branch.sections[k] = Math.max(3, Math.round(o.branch.sections[k] * 0.6)); o.branch.segments[k] = Math.min(o.branch.segments[k], 4); }
+    o.leaves.count = Math.max(2, Math.round(o.leaves.count * 0.8)); o.leaves.size *= 1.1;
   }
-}
-
-function broadleaf(seed) {
-  const r = rng(seed), Hf = 8 + r() * 3.5, parts = [trunkGeo(Hf + 1.5, 0.5, 0.3, (r() - 0.5) * 0.8, (r() - 0.5) * 0.8)];
-  const fork = new THREE.Vector3(0, Hf - 0.4, 0), cards = new Cards(), nb = 4 + ((r() * 2) | 0);
-  for (let i = 0; i < nb; i++) {
-    const a = (i / nb) * 6.283 + r() * 0.8, out = 3.2 + r() * 3.2;
-    const end = new THREE.Vector3(Math.cos(a) * out, Hf + 3.5 + r() * 3.5, Math.sin(a) * out);
-    parts.push(branchGeo(fork, end, 0.2, 0.05));
-    crownCards(cards, r, end, new THREE.Vector3(3.0, 2.0, 3.0), 12, 2.7);
+  if (lod === 1) {            // mid: small plants up close
+    o.leaves.count = Math.max(2, Math.round(o.leaves.count * 0.6)); o.leaves.size *= 1.25;
+    for (const k of [0, 1, 2, 3]) { o.branch.sections[k] = Math.max(2, Math.round(o.branch.sections[k] / 2)); o.branch.segments[k] = Math.min(o.branch.segments[k], k === 0 ? 6 : 3); }
   }
-  parts.push(branchGeo(fork, new THREE.Vector3(r() - 0.5, Hf + 6.5, r() - 0.5), 0.24, 0.05));
-  crownCards(cards, r, new THREE.Vector3(0, Hf + 5.5, 0), new THREE.Vector3(6.6, 4.6, 6.6), 70, 3.0);
-  return { wood: mergeGeometries(parts), leaves: cards.build(), radius: 0.55 };
-}
-
-function birch(seed) {
-  const r = rng(seed), H = 12.5 + r() * 4, cards = new Cards();
-  const bx = (r() - 0.5) * 2.4, bz = (r() - 0.5) * 2.4;
-  const parts = [trunkGeo(H, 0.17, 0.04, bx, bz, 8, 10)];
-  for (let i = 0; i < 4; i++) {
-    const t = 0.5 + r() * 0.35, a = r() * 6.283;
-    const from = new THREE.Vector3(bx * t * t, t * H - 0.4, bz * t * t);
-    const end = from.clone().add(new THREE.Vector3(Math.cos(a) * 1.8, 1.4 + r(), Math.sin(a) * 1.8));
-    parts.push(branchGeo(from, end, 0.05, 0.015));
-    crownCards(cards, r, end, new THREE.Vector3(1.4, 1.6, 1.4), 8, 1.7);
-  }
-  crownCards(cards, r, new THREE.Vector3(bx * 0.6, H * 0.74, bz * 0.6), new THREE.Vector3(2.6, H * 0.3, 2.6), 44, 2.0);
-  return { wood: mergeGeometries(parts), leaves: cards.build(), radius: 0.25 };
-}
-
-function spruce(seed) {
-  const r = rng(seed), H = 17 + r() * 6, cards = new Cards(), whorls = 13, y0 = 2.6 + r() * 2.5;
-  for (let w = 0; w < whorls; w++) {
-    const f = w / (whorls - 1), y = lerp(y0, H - 1.1, Math.pow(f, 0.92)), L = lerp(3.7, 0.7, Math.pow(f, 0.85)) * (0.9 + r() * 0.2);
-    const nb = 6, off = r() * 6.283;
-    for (let b = 0; b < nb; b++) {
-      const a = off + (b / nb) * 6.283 + (r() - 0.5) * 0.3;
-      const d = new THREE.Vector3(Math.cos(a), -0.28 - 0.28 * (1 - f) + (r() - 0.5) * 0.12, Math.sin(a)).normalize();
-      const side = new THREE.Vector3().crossVectors(d, UP).normalize().applyAxisAngle(d, (r() < 0.5 ? -1 : 1) * (0.35 + r() * 0.55));
-      const c = d.clone().multiplyScalar(L * 0.5).add(new THREE.Vector3(0, y, 0));
-      const n = new THREE.Vector3(Math.cos(a) * 0.55, 0.85, Math.sin(a) * 0.55).normalize();
-      cards.add(c, side.multiplyScalar(L * 0.42), d.clone().multiplyScalar(L * 0.5), n);
+  if (lod === 2) {            // far: a light silhouette for the mist
+    for (const k of [0, 1, 2, 3]) {
+      o.branch.sections[k] = k === 0 ? Math.max(3, Math.round(o.branch.sections[k] / 4)) : 2;
+      o.branch.segments[k] = k === 0 ? 4 : 3;
+      if (k < L) o.branch.children[k] = Math.max(1, Math.round(o.branch.children[k] * (L === 1 ? 0.4 : k === 0 ? 0.8 : 0.6)));
     }
+    o.leaves.count = Math.max(1, Math.round(o.leaves.count * 0.3));
+    o.leaves.size *= 2.3;
   }
-  for (let i = 0; i < 3; i++) {
-    const a = (i / 3) * Math.PI;
-    cards.add(new THREE.Vector3(0, H - 0.9, 0), new THREE.Vector3(Math.cos(a) * 0.75, 0, Math.sin(a) * 0.75), new THREE.Vector3(0, 1.1, 0), new THREE.Vector3(Math.cos(a + 1.57) * 0.5, 0.85, Math.sin(a + 1.57) * 0.5).normalize());
-  }
-  return { wood: trunkGeo(H, 0.36, 0.035, (r() - 0.5) * 0.5, (r() - 0.5) * 0.5, 9, 6), leaves: cards.build(), radius: 0.45 };
+  tree.generate();
+  const wood = tree.branchesMesh.geometry, leaves = tree.leavesMesh.geometry;
+  wood.computeBoundingBox(); leaves.computeBoundingBox();
+  const top = Math.max(wood.boundingBox.max.y, leaves.boundingBox.max.y), k = height / top;
+  for (const g of [wood, leaves]) { g.scale(k, k, k); g.translate(0, -0.25, 0); g.computeBoundingSphere(); g.computeBoundingBox(); }
+  return { wood, leaves, radius: o.branch.radius[0] * k, tris: (wood.index.count + leaves.index.count) / 3 };
 }
 
-function bush(seed) {
-  const r = rng(seed), cards = new Cards();
-  crownCards(cards, r, new THREE.Vector3(0, 0.75, 0), new THREE.Vector3(1.25, 0.85, 1.25), 14, 1.5);
-  return cards.build();
-}
-
-function grassGeo() {
+// upright sprig of real leaves: seedlings and undergrowth
+function sprigGeo() {
   const c = new Cards();
-  for (let i = 0; i < 3; i++) {
-    const a = (i / 3) * Math.PI;
-    c.add(new THREE.Vector3(0, 0.21, 0), new THREE.Vector3(Math.cos(a) * 0.32, 0, Math.sin(a) * 0.32), new THREE.Vector3(0, 0.21, 0), UP);
+  for (let i = 0; i < 2; i++) {
+    const a = i * 1.5708 + 0.4;
+    c.add(new THREE.Vector3(0, 0.5, 0), new THREE.Vector3(Math.cos(a) * 0.5, 0, Math.sin(a) * 0.5), new THREE.Vector3(0, 0.5, 0), new THREE.Vector3(0, 1, 0));
   }
   return c.build();
-}
-function fernGeo(seed) {
-  const r = rng(seed), p = [], n = [], uv = [], idx = [], fronds = 7, segs = 4;
-  for (let f = 0; f < fronds; f++) {
-    const a = (f / fronds) * 6.283 + r() * 0.5, len = 0.75 + r() * 0.45, lift = 0.75 + r() * 0.35, b = p.length / 3;
-    const dx = Math.cos(a), dz = Math.sin(a), sx = -dz, sz = dx;
-    for (let s = 0; s <= segs; s++) {
-      const t = s / segs, out = t * len, y = Math.sin(t * 2.1) * lift * 0.55 * len, w = 0.19 * len;
-      p.push(dx * out - sx * w, y, dz * out - sz * w, dx * out + sx * w, y, dz * out + sz * w);
-      n.push(dx * 0.3, 0.95, dz * 0.3, dx * 0.3, 0.95, dz * 0.3); uv.push(0, t, 1, t);
-      if (s < segs) { const i = b + s * 2; idx.push(i, i + 1, i + 3, i, i + 3, i + 2); }
-    }
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
-  g.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  g.setIndex(idx);
-  return g;
 }
 function tint(g, hex) {
   const c = new THREE.Color(hex), a = new Float32Array(g.attributes.position.count * 3);
@@ -211,18 +162,17 @@ function mushroomGeo(cap) {
   const top = new THREE.SphereGeometry(0.07, 10, 5, 0, 6.283, 0, 1.5); top.scale(1, 0.62, 1); top.translate(0, 0.085, 0);
   return mergeGeometries([tint(stem, '#e9e0cc'), tint(top, cap)]);
 }
-function rockGeo(seed) {
-  let g = new THREE.IcosahedronGeometry(1, 3); g.deleteAttribute('uv'); g.deleteAttribute('normal'); g = mergeVertices(g);
-  const p = g.attributes.position, uv = new Float32Array(p.count * 2);
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-    const d = 0.62 + 0.75 * fbm(x * 1.1 + y * 0.8 + seed * 3.7, z * 1.1 - y * 0.7 + seed, 4, seed);
-    p.setXYZ(i, x * d, y * d * 0.62, z * d);
-    uv[i * 2] = Math.atan2(z, x) / 6.283 * 2; uv[i * 2 + 1] = y * 0.6;
-  }
-  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-  g.computeVertexNormals();
-  return g;
+// bake a loaded model's node transform into its geometry and sit it on the ground
+function bakeModel(gltf, size) {
+  let mesh = null; gltf.scene.updateMatrixWorld(true);
+  gltf.scene.traverse((o) => { if (o.isMesh && !mesh) mesh = o; });
+  const g = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
+  g.computeBoundingBox();
+  const bb = g.boundingBox, k = size / Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z);
+  g.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2); g.scale(k, k, k);
+  if (!g.attributes.normal) g.computeVertexNormals();
+  g.computeBoundingSphere();
+  return { geo: g, mat: mesh.material };
 }
 
 // ---------- chunked instancing ----------
@@ -246,7 +196,7 @@ class Scatter {
         mesh.castShadow = !!part.cast; mesh.receiveShadow = part.receive !== false;
         if (part.depth) mesh.customDepthMaterial = part.depth;
         mesh.computeBoundingSphere();
-        mesh.matrixAutoUpdate = false;
+        mesh.matrixAutoUpdate = false; mesh.userData.lod = part.lod;
         parent.add(mesh); meshes.push(mesh);
       }
     }
@@ -254,37 +204,77 @@ class Scatter {
   }
 }
 
-export function buildFlora(scene, tex, Q) {
+const SPECIES = {
+  oak:    { presets: ['Oak Large', 'Oak Medium', 'Ash Large'],     h: [25, 20, 23],    sway: 0.14, flutter: 0.035 },
+  spruce: { presets: ['Pine Large', 'Pine Medium', 'Pine Large'],  h: [31, 24, 27],    sway: 0.1,  flutter: 0.015 },
+  birch:  { presets: ['Aspen Large', 'Aspen Medium', 'Aspen Large'], h: [19, 16, 21],  sway: 0.2,  flutter: 0.05 },
+  bush:   { presets: ['Bush 1', 'Bush 2', 'Bush 3'],               h: [2.3, 1.8, 2.7], sway: 0.03, flutter: 0.03 },
+  young:  { presets: ['Oak Small', 'Pine Small', 'Aspen Small'],   h: [5.5, 7, 6],     sway: 0.08, flutter: 0.04 },
+};
+const loaded = (t) => new Promise((res) => { const chk = () => (t.image ? res() : setTimeout(chk, 30)); chk(); });
+
+export async function buildFlora(scene, tex, Q) {
   const r = rng(2026), root = new THREE.Group(); scene.add(root);
   const colliders = [];
+  const loader = new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('models/'));
+  const [rocks, grassModel] = await Promise.all([
+    Promise.all(['rock1', 'rock2', 'rock3'].map((n) => loader.loadAsync(`models/${n}.glb`))),
+    loader.loadAsync('models/grass.glb'),
+  ]);
+  const barkKinds = ['oak', 'pine', 'birch'], leafKinds = ['oak', 'pine', 'aspen', 'ash'];
+  await Promise.all([...barkKinds.flatMap((k) => [getBarkTexture(k, 'color'), getBarkTexture(k, 'normal')]), ...leafKinds.map(getLeafTexture)].map(loaded));
 
   // materials
-  const barkMat = (k, ns) => patchMoss(new THREE.MeshLambertMaterial({ map: tex['bark_' + k], normalMap: tex['barkN_' + k], normalScale: new THREE.Vector2(ns, ns) }), k === 'birch' ? 0.08 : 0.3);
-  const leafMat = (map, sway, flutter) => patchWind(new THREE.MeshLambertMaterial({ map, alphaTest: 0.38, side: THREE.DoubleSide }), { sway, flutter, mode: 'tree' });
-  const depth = (map) => new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map, alphaTest: 0.38, side: THREE.DoubleSide });
-  const mats = {
-    spruceW: barkMat('spruce', 1.5), oakW: barkMat('oak', 1.5), birchW: barkMat('birch', 0.6),
-    spruceL: leafMat(tex.branch, 0.1, 0.012), oakL: leafMat(tex.leaves, 0.14, 0.03), birchL: leafMat(tex.leavesBirch, 0.2, 0.045),
-    grass: patchWind(new THREE.MeshLambertMaterial({ map: tex.grass, alphaTest: 0.3, side: THREE.DoubleSide }), { sway: 0.07, flutter: 0.035, mode: 'cover', fade: Q.coverDist }),
-    fern: patchWind(new THREE.MeshLambertMaterial({ map: tex.fern, alphaTest: 0.35, side: THREE.DoubleSide }), { sway: 0.04, flutter: 0.02, mode: 'cover', fade: Q.coverDist }),
-    small: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }),
-    rock: patchMoss(new THREE.MeshLambertMaterial({ map: tex.rock, normalMap: tex.rockN }), 0.85),
+  const barkCache = new Map();
+  const barkMat = (kind, sx, sy) => {
+    const key = kind + sx + '/' + sy;
+    if (!barkCache.has(key)) {
+      const map = getBarkTexture(kind, 'color').clone(), normalMap = getBarkTexture(kind, 'normal').clone();
+      for (const t of [map, normalMap]) { t.repeat.set(sx, sy); t.needsUpdate = true; }
+      barkCache.set(key, patchMoss(new THREE.MeshLambertMaterial({ map, normalMap }), kind === 'birch' ? 0.05 : 0.22));
+    }
+    return barkCache.get(key);
   };
-  const dSpruce = depth(tex.branch), dOak = depth(tex.leaves), dBirch = depth(tex.leavesBirch);
+  const leafCache = new Map();
+  const leafMat = (kind, sway, flutter) => {
+    const key = kind + sway;
+    if (!leafCache.has(key)) {
+      const map = getLeafTexture(kind);
+      const mat = patchWind(new THREE.MeshLambertMaterial({ map, alphaTest: 0.5, side: THREE.DoubleSide }), { sway, flutter, mode: 'tree' });
+      if (kind === 'aspen') mat.color.setRGB(0.3, 0.7, 0.22);          // the photographed aspen is in autumn colour
+      leafCache.set(key, { mat, depth: new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map, alphaTest: 0.5, side: THREE.DoubleSide }) });
+    }
+    return leafCache.get(key);
+  };
+  const coverMat = (map, alphaTest) => patchWind(new THREE.MeshLambertMaterial({ map, alphaTest, side: THREE.DoubleSide }), { sway: 0.06, flutter: 0.03, mode: 'cover', fade: Q.coverDist });
+  const mats = { small: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }) };
 
-  const defs = {}, radius = {};
-  for (let v = 0; v < 3; v++) {
-    const s = spruce(100 + v), o = broadleaf(200 + v), b = birch(300 + v);
-    defs['spruce' + v] = [{ geo: s.wood, mat: mats.spruceW, cast: true, tint: false }, { geo: s.leaves, mat: mats.spruceL, cast: true, depth: dSpruce }];
-    defs['oak' + v] = [{ geo: o.wood, mat: mats.oakW, cast: true, tint: false }, { geo: o.leaves, mat: mats.oakL, cast: true, depth: dOak }];
-    defs['birch' + v] = [{ geo: b.wood, mat: mats.birchW, cast: true, tint: false }, { geo: b.leaves, mat: mats.birchL, cast: true, depth: dBirch }];
-    radius['spruce' + v] = s.radius; radius['oak' + v] = o.radius; radius['birch' + v] = b.radius;
-    defs['bush' + v] = [{ geo: bush(400 + v), mat: mats.oakL, cast: true, depth: dOak }];
-    defs['rock' + v] = [{ geo: rockGeo(v + 1), mat: mats.rock, cast: true }];
-    defs['fern' + v] = [{ geo: fernGeo(500 + v), mat: mats.fern }];
+  // grow every tree shape once, at two levels of detail, then instance it
+  const defs = {}, radius = {}, budget = {};
+  for (const [name, sp] of Object.entries(SPECIES)) {
+    sp.presets.forEach((preset, v) => {
+      const o = TreePreset[preset], ts = o.bark.textureScale, wood = barkMat(o.bark.type, ts.x, 1 / ts.y), leaf = leafMat(o.leaves.type, sp.sway, sp.flutter);
+      const parts = [];
+      const small = name === 'bush' || name === 'young';
+      for (const far of Q.lodDist > 0 ? [0, 1] : [1]) {
+        const t = growTree(preset, 1000 + v * 77 + name.length, far ? 2 : small ? 1 : 0, sp.h[v]);
+        const tag = Q.lodDist > 0 ? (far ? 'lo' : 'hi') : undefined, lod = far;
+        parts.push({ geo: t.wood, mat: wood, cast: true, tint: false, lod: tag }, { geo: t.leaves, mat: leaf.mat, depth: leaf.depth, cast: true, lod: tag });
+        radius[name + v] = t.radius; budget[name + v + (lod ? 'lo' : 'hi')] = t.tris;
+      }
+      defs[name + v] = parts;
+    });
   }
-  defs.log = [{ geo: trunkGeo(7, 0.34, 0.26, 0, 0, 9, 3), mat: mats.oakW, cast: true, tint: false }];
-  defs.grass = [{ geo: grassGeo(), mat: mats.grass }];
+  rocks.forEach((g, v) => {
+    const b = bakeModel(g, 2), src = b.mat;
+    defs['rock' + v] = [{ geo: b.geo, mat: new THREE.MeshLambertMaterial({ map: src.map, normalMap: src.normalMap, color: new THREE.Color(2.6, 2.6, 2.5), side: THREE.DoubleSide }), cast: true }];
+  });
+  const tuft = bakeModel(grassModel, 0.75);
+  tuft.geo.attributes.normal.array.fill(0).forEach((_, i, a) => { if (i % 3 === 1) a[i] = 1; });
+  tuft.mat.map.anisotropy = 4;
+  defs.grass = [{ geo: tuft.geo, mat: coverMat(tuft.mat.map, 0.4) }];
+  ['ash', 'oak', 'pine'].forEach((k, i) => { defs['sprig' + i] = [{ geo: sprigGeo(), mat: coverMat(getLeafTexture(k), 0.5) }]; });
+  defs.log = [{ geo: trunkGeo(7, 0.34, 0.26, 0, 0, 9, 3), mat: barkMat('oak', 1, 1), cast: true, tint: false }];
   ['#f4f1e6', '#f2d23c', '#b48ae0', '#ee8fb0'].forEach((c, i) => { defs['flower' + i] = [{ geo: flowerGeo(c), mat: mats.small, tint: false }]; });
   ['#b23a22', '#9a6a3c'].forEach((c, i) => { defs['shroom' + i] = [{ geo: mushroomGeo(c), mat: mats.small, tint: false }]; });
 
@@ -296,7 +286,7 @@ export function buildFlora(scene, tex, Q) {
   };
 
   // --- trees ---
-  const trees = new Scatter(80), E = 250, cell = Q.treeCell;
+  const trees = new Scatter(50), E = 250, cell = Q.treeCell;
   for (let gx = -E; gx < E; gx += cell) for (let gz = -E; gz < E; gz += cell) {
     const x = gx + r() * cell * 0.85, z = gz + r() * cell * 0.85, h = heightAt(x, z);
     if (h < 0.55) continue;
@@ -304,27 +294,26 @@ export function buildFlora(scene, tex, Q) {
     if (cl > 0.35 && r() > 0.004) continue;
     if (r() > 0.2 + 0.8 * dens) continue;
     const con = coniferness(x, z), v = (r() * 3) | 0, edge = h < 2 || dens < 0.45;
-    const kind = r() < con * 0.9 ? 'spruce' : r() < (edge ? 0.5 : 0.14) ? 'birch' : 'oak';
-    const young = r() < 0.16;
-    const sc = young ? 0.25 + r() * 0.3 : (kind === 'spruce' ? 0.95 : 0.9) + r() * 0.65;
-    const b = 0.72 + r() * 0.4;
-    col.setRGB(b * (0.95 + r() * 0.15), b, b * (0.85 + r() * 0.2));
-    place(trees, kind + v, x, z, sc, { lean: 0.07, sy: 0.9 + r() * 0.25, c: col });
+    const young = r() < 0.14;
+    const kind = young ? 'young' : r() < con * 0.9 ? 'spruce' : r() < (edge ? 0.5 : 0.14) ? 'birch' : 'oak';
+    const sc = 0.8 + r() * 0.5, b = 0.6 + r() * 0.35;
+    col.setRGB(b * (0.92 + r() * 0.16), b, b * (0.85 + r() * 0.2));
+    place(trees, kind + v, x, z, sc, { lean: 0.06, sy: 0.92 + r() * 0.2, c: col, sink: young ? 0.2 : 1.3 });
     if (!young) colliders.push({ x, z, r: radius[kind + v] * sc + 0.3 });
   }
   // --- bushes, rocks, logs ---
   for (let i = 0; i < Q.bushes; i++) {
     const x = (r() - 0.5) * 420, z = (r() - 0.5) * 420;
     if (heightAt(x, z) < 0.5 || clearingFactor(x, z) > 0.7 || r() > 0.35 + forestDensity(x, z) * 0.5) continue;
-    const b = 0.5 + r() * 0.35; col.setRGB(b, b, b * 0.9);
-    place(trees, 'bush' + ((r() * 3) | 0), x, z, 0.6 + r() * 0.6, { sink: 0.1, c: col });
+    const b = 0.55 + r() * 0.3; col.setRGB(b, b, b * 0.9);
+    place(trees, 'bush' + ((r() * 3) | 0), x, z, 0.6 + r() * 0.7, { sink: 0.05, c: col });
   }
   for (let i = 0; i < Q.rocks; i++) {
     const x = (r() - 0.5) * 400, z = (r() - 0.5) * 400, big = r() < 0.12;
     if (heightAt(x, z) < -0.6) continue;
-    const sc = big ? 1.3 + r() * 1.6 : 0.25 + r() * 0.7, b = 0.75 + r() * 0.4; col.setRGB(b, b, b);
-    place(trees, 'rock' + ((r() * 3) | 0), x, z, sc, { sink: sc * 0.18, lean: 0.6, c: col });
-    if (sc > 0.9) colliders.push({ x, z, r: sc * 0.95 });
+    const sc = big ? 0.9 + r() * 1.3 : 0.15 + r() * 0.45, b = 0.7 + r() * 0.3; col.setRGB(b, b, b);
+    place(trees, 'rock' + ((r() * 3) | 0), x, z, sc, { sink: sc * 0.35, lean: 0.5, sy: 0.7 + r() * 0.5, c: col });
+    if (sc > 0.8) colliders.push({ x, z, r: sc * 0.85 });
   }
   for (let i = 0; i < Q.logs; i++) {
     const x = (r() - 0.5) * 360, z = (r() - 0.5) * 360;
@@ -336,7 +325,9 @@ export function buildFlora(scene, tex, Q) {
     }
   }
   const treeMeshes = trees.build(defs, root);
+  const lodCull = treeMeshes.map((mesh) => ({ mesh, lod: mesh.userData.lod, c: mesh.boundingSphere.center.clone(), rad: mesh.boundingSphere.radius }));
 
+  const grassTint = (b, dry) => col.setRGB(b * (0.17 + dry * 0.13), b * 0.36, b * 0.07);
   // --- ground cover (distance-culled chunks) ---
   const cover = new Scatter(40);
   const area = 400 * 400;
@@ -345,26 +336,26 @@ export function buildFlora(scene, tex, Q) {
     if (h < 0.12) continue;
     const open = Math.max(clearingFactor(x, z), 1 - forestDensity(x, z));
     if (r() > 0.1 + open * 0.9) continue;
-    const b = 0.75 + r() * 0.5; col.setRGB(b * (0.9 + r() * 0.25), b, b * 0.8);
+    grassTint(0.75 + r() * 0.5, r());
     place(cover, 'grass', x, z, 0.7 + r() * 0.7 + open * 0.2, { sink: 0.03, sy: 0.7 + r() * 0.6, c: col });
   }
   // extra-lush meadow in the clearing, with flowers
   for (let i = 0; i < 3000 * Q.grass * 40; i++) {
     const a = r() * 6.283, d = Math.sqrt(r()) * (CLEARING.r + 6), x = CLEARING.x + Math.cos(a) * d, z = CLEARING.z + Math.sin(a) * d;
-    const b = 0.8 + r() * 0.45; col.setRGB(b * (0.95 + r() * 0.25), b, b * 0.75);
+    grassTint(0.85 + r() * 0.5, r());
     place(cover, 'grass', x, z, 0.8 + r() * 0.7, { sink: 0.03, sy: 0.8 + r() * 0.8, c: col });
     if (r() < 0.05) place(cover, 'flower' + ((r() * 4) | 0), x + r() - 0.5, z + r() - 0.5, 0.55 + r() * 0.5, { lean: 0.3 });
   }
   for (let i = 0; i < area * Q.ferns; i++) {
     const x = (r() - 0.5) * 400, z = (r() - 0.5) * 400, h = heightAt(x, z);
     if (h < 0.25 || r() > forestDensity(x, z) * 0.9 + 0.08) continue;
-    const b = 0.5 + r() * 0.35; col.setRGB(b, b, b * 0.85);
-    place(cover, 'fern' + ((r() * 3) | 0), x, z, 0.45 + r() * 0.5, { sink: 0.02, lean: 0.2, c: col });
+    const b = 0.55 + r() * 0.35; col.setRGB(b, b, b * 0.9);
+    place(cover, 'sprig' + ((r() * 3) | 0), x, z, 0.45 + r() * 0.75, { sink: 0.02, lean: 0.2, c: col });
   }
   for (let i = 0; i < 1400; i++) {         // reeds of tall grass around the pond
     const a = r() * 6.283, d = POND.r * (0.55 + r() * 0.5), x = POND.x + Math.cos(a) * d, z = POND.z + Math.sin(a) * d, h = heightAt(x, z);
     if (h < -0.25 || h > 0.9) continue;
-    col.setRGB(0.8, 0.85, 0.5);
+    grassTint(0.9, 0.9);
     place(cover, 'grass', x, z, 1.3 + r() * 0.8, { sink: 0.05, sy: 1.6 + r() * 1.2, c: col });
   }
   const coverMeshes = cover.build(defs, root);
@@ -386,8 +377,15 @@ export function buildFlora(scene, tex, Q) {
 
   return {
     collide, colliders, treeCount: colliders.length, meshCount: treeMeshes.length + coverMeshes.length,
+    budget,
     update(cam) {
       for (const c of coverCull) c.mesh.visible = c.c.distanceTo(cam) - c.rad < Q.coverDist;
+      for (const c of lodCull) {       // beyond the mist nothing is drawn; close up the detailed shapes take over
+        const d = c.c.distanceTo(cam);
+        if (d - c.rad > Q.treeFar) { c.mesh.visible = false; continue; }
+        const near = d - c.rad * 0.6 < Q.lodDist;
+        c.mesh.visible = !c.lod || (c.lod === 'hi' ? near : !near);
+      }
     },
   };
 }

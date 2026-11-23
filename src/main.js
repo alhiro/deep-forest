@@ -5,7 +5,8 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { makeTextures } from './textures.js';
 import { buildTerrain, heightAt, forestDensity, coniferness, trail, CLEARING, POND } from './terrain.js';
-import { buildFlora, windTime } from './flora.js';
+import { buildFlora, windTime, sunView } from './flora.js';
+import { SUN } from './atmosphere.js';
 import { buildAtmosphere } from './atmosphere.js';
 import { buildFauna } from './fauna.js';
 import { Player } from './player.js';
@@ -13,14 +14,14 @@ import { ForestAudio } from './audio.js';
 
 // ---------- detail levels ----------
 const LEVELS = {
-  low:    { treeCell: 7.6, grass: 0.22, ferns: 0.05, bushes: 700,  rocks: 300, logs: 40, shadow: 1024, shadowRange: 40, coverDist: 48, pr: 1,    post: false, segs: 220, shafts: 26, dust: 500,  foxes: 3, horses: 4, birds: 2, butterflies: 30 },
-  medium: { treeCell: 6.1, grass: 0.5,  ferns: 0.1,  bushes: 1300, rocks: 450, logs: 60, shadow: 2048, shadowRange: 56, coverDist: 66, pr: 1.5,  post: true,  segs: 320, shafts: 46, dust: 1200, foxes: 5, horses: 5, birds: 3, butterflies: 60 },
-  high:   { treeCell: 5.1, grass: 0.9,  ferns: 0.16, bushes: 2000, rocks: 600, logs: 80, shadow: 4096, shadowRange: 72, coverDist: 86, pr: 2,    post: true,  segs: 420, shafts: 70, dust: 2200, foxes: 6, horses: 7, birds: 4, butterflies: 90 },
+  low:    { treeCell: 7.6, grass: 0.22, ferns: 0.05, bushes: 700,  rocks: 300, logs: 40, shadow: 1024, shadowRange: 40, coverDist: 48, pr: 1,    post: false, lodDist: 0,  treeFar: 115, segs: 220, shafts: 26, dust: 500,  foxes: 3, horses: 4, birds: 2, butterflies: 30 },
+  medium: { treeCell: 6.4, grass: 0.5,  ferns: 0.1,  bushes: 1300, rocks: 450, logs: 60, shadow: 2048, shadowRange: 56, coverDist: 66, pr: 1.5,  post: true,  lodDist: 30, treeFar: 135, segs: 320, shafts: 46, dust: 1200, foxes: 5, horses: 5, birds: 3, butterflies: 60 },
+  high:   { treeCell: 5.6, grass: 0.9,  ferns: 0.16, bushes: 2000, rocks: 600, logs: 80, shadow: 4096, shadowRange: 62, coverDist: 86, pr: 2,    post: true,  lodDist: 44, treeFar: 155, segs: 420, shafts: 70, dust: 2200, foxes: 6, horses: 7, birds: 4, butterflies: 90 },
 };
 const params = new URLSearchParams(location.search);
 const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
 const coarse = matchMedia('(pointer: coarse)').matches;
-const guess = coarse ? 'low' : (navigator.hardwareConcurrency || 4) >= 8 ? 'high' : 'medium';
+const guess = coarse ? 'low' : 'medium';
 const level = LEVELS[params.get('q')] ? params.get('q') : LEVELS[store.get('forest.detail')] ? store.get('forest.detail') : guess;
 const Q = LEVELS[level];
 
@@ -37,7 +38,7 @@ async function boot() {
   // ---------- renderer ----------
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: !Q.post, powerPreference: 'high-performance' });
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.92;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
   renderer.info.autoReset = false;
   const basePR = Math.min(devicePixelRatio || 1, Q.pr);
   let scale = 1;
@@ -65,7 +66,7 @@ async function boot() {
   scene.add(buildTerrain(tex, Q.segs));
   const atmo = buildAtmosphere(scene, tex, Q);
   await progress(0.4, 'Growing the forest…');
-  const flora = buildFlora(scene, tex, Q);
+  const flora = await buildFlora(scene, tex, Q);
   await progress(0.75, 'Waking the animals…');
   const fauna = await buildFauna(scene, Q);
   const audio = new ForestAudio();
@@ -125,6 +126,7 @@ async function boot() {
     if (!inside) player.yaw += dt * 0.035;              // slow pan behind the menu
     player.update(dt);
     windTime.value = t;
+    sunView.value.copy(SUN).transformDirection(camera.matrixWorldInverse);
     flora.update(camera.position);
     fauna.update(dt, player);
     atmo.update(t, camera.position, (basePR * scale * innerHeight) / 900);
@@ -147,7 +149,7 @@ async function boot() {
   await progress(1);
   enterBtn.disabled = false; enterBtn.textContent = 'Enter the forest';
   window.__forest = { player, goTo, renderer, places, fauna, flora, enter,
-    snap() { renderer.info.reset(); if (composer) composer.render(0.016); else renderer.render(scene, camera); return { img: canvas.toDataURL('image/jpeg', 0.92), calls: renderer.info.render.calls, tris: renderer.info.render.triangles, fps }; } };
+    snap() { flora.update(camera.position); sunView.value.copy(SUN).transformDirection(camera.matrixWorldInverse); renderer.info.reset(); if (composer) composer.render(0.016); else renderer.render(scene, camera); return { img: canvas.toDataURL('image/jpeg', 0.92), calls: renderer.info.render.calls, tris: renderer.info.render.triangles, fps }; } };
   if (params.get('auto')) enter();
   frame();
 }
@@ -156,5 +158,5 @@ boot().catch((err) => {
   console.error(err);
   enterBtn.textContent = 'Could not start';
   const f = $('fail'); f.style.display = 'block';
-  f.textContent = 'This browser could not start WebGL 2. Try a recent Chrome, Edge, Firefox or Safari with hardware acceleration on. (' + err.message + ')';
+  f.textContent = 'The forest could not start. It needs WebGL 2: try a recent Chrome, Edge, Firefox or Safari with hardware acceleration on. (' + err.message + ')';
 });

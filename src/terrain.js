@@ -58,32 +58,33 @@ export function buildTerrain(tex, segs) {
   for (let i = 0; i < pos.count; i++) pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)));
   geo.computeVertexNormals();
   const nor = geo.attributes.normal;
-  const col = new Float32Array(pos.count * 3);
-  const c = new THREE.Color(), t = new THREE.Color();
-  const litter = new THREE.Color().setRGB(0.62, 0.47, 0.31, THREE.SRGBColorSpace);
-  const moss = new THREE.Color().setRGB(0.36, 0.5, 0.2, THREE.SRGBColorSpace);
-  const grass = new THREE.Color().setRGB(0.5, 0.66, 0.26, THREE.SRGBColorSpace);
-  const mud = new THREE.Color().setRGB(0.3, 0.25, 0.18, THREE.SRGBColorSpace);
-  const rock = new THREE.Color().setRGB(0.5, 0.5, 0.47, THREE.SRGBColorSpace);
+  const col = new Float32Array(pos.count * 3), grassy = new Float32Array(pos.count);
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-    const dens = forestDensity(x, z), cl = clearingFactor(x, z);
-    const n = fbm(x * 0.08, z * 0.08, 3, 5);
-    c.copy(litter).lerp(moss, smoothstep(0.35, 0.7, n) * 0.85);
-    c.lerp(grass, Math.max(cl * 0.9, (1 - dens) * 0.3));
-    c.lerp(mud, smoothstep(0.9, 0.05, y));
-    c.lerp(mud, smoothstep(2.6, 0.6, trailDist(x, z)) * 0.8 * (1 - cl));
-    c.lerp(rock, smoothstep(0.8, 0.6, nor.getY(i)));
-    // darker under dense canopy: cheap ambient occlusion beyond shadow range
-    c.multiplyScalar(0.8 * lerp(1, 0.7, dens) * lerp(0.85, 1.1, fbm(x * 0.3, z * 0.3, 2, 12)));
-    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+    const dens = forestDensity(x, z), cl = clearingFactor(x, z), tr = smoothstep(2.6, 0.6, trailDist(x, z)) * (1 - cl);
+    const n = fbm(x * 0.08, z * 0.08, 3, 5), wet = smoothstep(0.9, 0.05, y);
+    // the photographs carry the colour; vertex colour only shades: damp ground, trodden trail, canopy shade
+    let v = lerp(1.25, 0.85, dens) * lerp(0.85, 1.15, fbm(x * 0.3, z * 0.3, 2, 12));
+    v *= lerp(1, 0.55, Math.max(wet, tr * 0.5));
+    col[i * 3] = v * 0.86; col[i * 3 + 1] = v * 0.96; col[i * 3 + 2] = v * lerp(0.84, 0.7, wet);
+    grassy[i] = clamp(Math.max(cl * 1.1, (1 - dens) * 0.75) + (n - 0.5) * 0.7 - wet * 0.6 - tr - smoothstep(0.85, 0.65, nor.getY(i)), 0, 1);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('aGrass', new THREE.BufferAttribute(grassy, 1));
   const uv = geo.attributes.uv;
-  for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) / 5, pos.getZ(i) / 5);
-  const mat = new THREE.MeshLambertMaterial({
-    map: tex.ground, normalMap: tex.groundN, normalScale: new THREE.Vector2(2.4, 2.4), vertexColors: true,
-  });
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) / 2.6, pos.getZ(i) / 2.6);
+  const mat = new THREE.MeshLambertMaterial({ map: tex.dirt, normalMap: tex.dirtN, normalScale: new THREE.Vector2(1.6, 1.6), vertexColors: true });
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uGrass = { value: tex.grassGround };
+    sh.vertexShader = 'attribute float aGrass;\nvarying float vGrass;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vGrass = aGrass;');
+    // two scales of each photograph hide the repeat; grass creeps in along the darker soil first
+    sh.fragmentShader = 'uniform sampler2D uGrass;\nvarying float vGrass;\n' + sh.fragmentShader.replace('#include <map_fragment>', `
+      vec3 d_ = mix(texture2D(map, vMapUv).rgb, texture2D(map, vMapUv * 0.23 + 0.37).rgb, 0.45);
+      vec3 g_ = mix(texture2D(uGrass, vMapUv * 1.3).rgb, texture2D(uGrass, vMapUv * 0.19 + 0.11).rgb, 0.5);
+      float n_ = texture2D(uGrass, vMapUv * 0.031).g + texture2D(map, vMapUv * 0.083).r;
+      float m_ = smoothstep(0.3, 0.7, vGrass + (0.22 - dot(d_, vec3(0.333))) * 1.2 + (n_ - 0.55) * 1.3);
+      diffuseColor.rgb *= mix(d_ * 1.6, g_ * 1.05, m_);`);
+  };
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
   return mesh;

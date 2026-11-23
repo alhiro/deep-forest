@@ -14,7 +14,7 @@ export function buildAtmosphere(scene, tex, Q) {
   scene.background = FOG_COLOR;
 
   // --- lights ---
-  const hemi = new THREE.HemisphereLight(0xb8d2e6, 0x4c5a3a, 1.35);
+  const hemi = new THREE.HemisphereLight(0xb8d2e6, 0x5e6a48, 1.5);
   const sun = new THREE.DirectionalLight(SUN_COLOR, 4.0);
   sun.castShadow = true;
   sun.shadow.mapSize.set(Q.shadow, Q.shadow);

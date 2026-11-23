@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { rng, lerp } from './noise.js';
 import { heightAt, trail, CLEARING, POND } from './terrain.js';
 
@@ -12,12 +13,24 @@ const turnTo = (cur, target, max) => {
 };
 const shadows = (o) => o.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; } });
 
+// The source models are flat-shaded low-poly; welding their vertices gives smooth shading.
+function smooth(geo, dropColor) {
+  const g = geo.clone();
+  g.deleteAttribute('normal'); if (dropColor) g.deleteAttribute('color');
+  if (g.morphAttributes.normal) delete g.morphAttributes.normal;
+  const m = mergeVertices(g, 1e-3);
+  m.computeVertexNormals();
+  return m;
+}
+
 export async function buildFauna(scene, Q, onProgress) {
   const loader = new GLTFLoader(), r = rng(4242);
   const load = (n) => loader.loadAsync(`models/${n}.glb`).catch(() => null);
   const [fox, horse, stork, parrot] = await Promise.all(['Fox', 'Horse', 'Stork', 'Parrot'].map(load));
   onProgress && onProgress();
   const updaters = [], foxes = [];
+  if (fox) fox.scene.traverse((o) => { if (o.isSkinnedMesh) { o.geometry = smooth(o.geometry, false); o.material.roughness = 0.9; } });
+  for (const g of [horse, stork, parrot]) if (g) { const m = g.scene.children[0]; m.geometry = smooth(m.geometry, g === horse); m.material.flatShading = false; m.material.vertexColors = g !== horse; m.material.roughness = 0.85; m.material.needsUpdate = true; }
 
   // ---------- foxes ----------
   if (fox) {
