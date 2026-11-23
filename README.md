@@ -33,13 +33,15 @@ Touch: hold to walk forward, slide to look, second finger to run.
 
 ## How it is made
 
-Everything except the four animal models is generated in the browser at load time.
+Terrain, placement, sky, water, light and sound are generated in the browser at load time. Trees are grown at load
+with the ez-tree generator and textured with photographs; rocks and the grass tuft are small models.
 
 | File | What it does |
 | --- | --- |
 | `src/terrain.js` | Height function, clearing, pond, the game trail, ground colours. Start here to reshape the world. |
-| `src/textures.js` | Paints bark, leaves, fern, grass, ground and rock textures on a 2D canvas. |
-| `src/flora.js` | Builds spruce, broadleaf and birch trees, bushes, ferns, grass, flowers, rocks and logs; instancing in culled chunks; wind. |
+| `src/textures.js` | Loads the ground photographs and paints the water ripple map. |
+| `src/eztree/` | Tree generator (MIT), trimmed to the textures the forest uses. |
+| `src/flora.js` | Grows oak, ash, pine and aspen/birch shapes at two levels of detail, plus bushes, seedlings, grass, flowers, rocks and logs; instancing in culled chunks; wind. |
 | `src/atmosphere.js` | Sun and shadows, mist, sky, light shafts, pollen, water. |
 | `src/fauna.js` | Fox behaviour, horse herd, birds, butterflies. |
 | `src/player.js` | Damped first-person walking, terrain following, trunk collision, touch. |
@@ -55,6 +57,8 @@ Testing helpers: `?q=low|medium|high`, `?vp=1..6`, `?auto=1` (skip the menu).
 
 - Fox: model by PixelMannen (CC0), rigging and animation by tomkranis (CC BY 4.0), glTF conversion by
   AsoboStudio and scurest (CC BY 4.0), from the Khronos glTF Sample Assets.
+- Trees, bark and leaf photographs, ground textures, rock and grass models: [ez-tree](https://github.com/dgreenheck/ez-tree)
+  by Daniel Greenheck (MIT).
 - Horse, Stork, Parrot: by mirada, from the ro.me project, distributed with the three.js examples.
 - [three.js](https://threejs.org) (MIT).
 
