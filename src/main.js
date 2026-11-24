@@ -25,7 +25,10 @@ const params = new URLSearchParams(location.search);
 const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
 const coarse = matchMedia('(pointer: coarse)').matches;
 const level = LEVELS[params.get('q')] ? params.get('q') : LEVELS[store.get('forest.detail')] ? store.get('forest.detail') : 'low';
-const Q = LEVELS[level];
+const Q = { ...LEVELS[level] };
+// tuning overrides for testing, e.g. ?q=medium&pr=1&post=0&shadow=1024
+for (const k of Object.keys(Q)) if (params.has(k)) Q[k] = typeof Q[k] === 'boolean' ? params.get(k) !== '0' : +params.get(k);
+const msaa = params.has('msaa') ? +params.get('msaa') : level === 'high' ? 4 : 2, bloomOn = params.get('bloom') !== '0', softShadow = params.get('soft') !== '0';
 const regionKey = REGIONS[params.get('r')] ? params.get('r') : REGIONS[store.get('forest.region')] ? store.get('forest.region') : 'sumatra';
 const region = REGIONS[regionKey];
 const species = speciesOf(regionKey);
@@ -60,7 +63,7 @@ async function boot() {
 
   // ---------- renderer ----------
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: !Q.post, powerPreference: 'high-performance' });
-  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = softShadow ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
   renderer.info.autoReset = false;
   const basePR = Math.min(devicePixelRatio || 1, Q.pr);
@@ -69,10 +72,10 @@ async function boot() {
   const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.12, 1000);
   let composer = null;
   if (Q.post) {
-    const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: level === 'high' ? 4 : 2 });
+    const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: msaa });
     composer = new EffectComposer(renderer, rt);
     composer.addPass(new RenderPass(scene, camera));
-    composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.2, 0.7, 0.92));
+    if (bloomOn) composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.2, 0.7, 0.92));
     composer.addPass(new OutputPass());
   }
   const resize = () => {
@@ -220,7 +223,10 @@ async function boot() {
   const clock = new THREE.Clock();
   let t = 0, acc = 0, frames = 0, fps = 60, slow = 0, fast = 0, lastAim = null;
   const waterNear = () => { let n = 0; for (let a = 0; a < 6.28; a += 0.785) if (heightAt(player.x + Math.cos(a) * 7, player.z + Math.sin(a) * 7) < 0) n++; return n / 8; };
+  let idle = 0;
   const frame = () => {
+    // behind the menu or a card the forest only needs a slow frame rate: keeps the GPU cool
+    if ((!inside || reading) && ++idle % 4) { requestAnimationFrame(frame); return; }
     const dt = Math.min(clock.getDelta(), 0.05); t += dt;
     if (!inside) player.yaw += dt * 0.035;              // slow pan behind the menu
     player.update(dt);
@@ -246,7 +252,7 @@ async function boot() {
     acc += dt; frames++;
     if (acc >= 1) {
       fps = frames / acc; acc = 0; frames = 0;
-      if (fps < 44) { slow++; fast = 0; } else if (fps > 57) { fast++; slow = 0; } else slow = fast = 0;
+      if (!inside || reading) slow = fast = 0; else if (fps < 44) { slow++; fast = 0; } else if (fps > 57) { fast++; slow = 0; } else slow = fast = 0;
       if (slow >= 2 && scale > 0.5 && !params.get('auto')) { scale = Math.max(0.5, scale - 0.1); slow = 0; resize(); }
       if (fast >= 6 && scale < 1) { scale = Math.min(1, scale + 0.05); fast = 0; resize(); }
       if (statsOn) $('stats').textContent = `${fps.toFixed(0)} fps · ${level}\n${renderer.info.render.calls} draw · ${(renderer.info.render.triangles / 1e6).toFixed(2)} jt segitiga\nresolusi ${(scale * 100) | 0}%`;
