@@ -8,6 +8,7 @@ import { TreePreset } from './eztree/presets.js';
 import { getBarkTexture, getLeafTexture } from './eztree/textures.js';
 import { rng, fbm, lerp, smoothstep } from './noise.js';
 import { heightAt, forestDensity, coniferness, clearingFactor, CLEARING, POND, HALF } from './terrain.js';
+import { SUN_COLOR } from './atmosphere.js';
 
 export const windTime = { value: 0 };
 export const sunView = { value: new THREE.Vector3(0, 1, 0) };   // sun direction in view space, set every frame
@@ -175,6 +176,40 @@ function bakeModel(gltf, size) {
   return { geo: g, mat: mesh.material };
 }
 
+// ---------- impostors: a far tree is one camera-facing picture of itself ----------
+function captureImpostor(renderer, parts) {
+  const box = new THREE.Box3();
+  for (const p of parts) { p.geo.computeBoundingBox(); box.union(p.geo.boundingBox); }
+  const w = 2 * Math.max(-box.min.x, box.max.x, -box.min.z, box.max.z), y0 = box.min.y, h = box.max.y - y0;
+  const scene = new THREE.Scene(), cam = new THREE.OrthographicCamera(-w / 2, w / 2, box.max.y, y0, 0.1, 400);
+  cam.position.set(0, 0, 200);
+  const sun = new THREE.DirectionalLight(SUN_COLOR, 2.4); sun.position.set(0.5, 0.8, 0.6);
+  scene.add(new THREE.HemisphereLight(0xc4d6e0, 0x56603f, 1.25), sun);
+  for (const p of parts) { const m = new THREE.Mesh(p.geo, p.mat); m.frustumCulled = false; scene.add(m); }
+  const rt = new THREE.WebGLRenderTarget(256, 512, { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
+  const keep = sunView.value.clone(), bg = new THREE.Color(); renderer.getClearColor(bg); const alpha = renderer.getClearAlpha();
+  sunView.value.set(0.5, 0.8, 0.6).normalize();
+  renderer.setRenderTarget(rt); renderer.setClearColor(0x16240f, 0); renderer.clear(); renderer.render(scene, cam);
+  renderer.setRenderTarget(null); renderer.setClearColor(bg, alpha); sunView.value.copy(keep);
+  return { tex: rt.texture, w, h, y0 };
+}
+const impostorGeo = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0);
+function impostorMat(imp) {
+  const mat = new THREE.MeshBasicMaterial({ map: imp.tex, alphaTest: 0.5, side: THREE.DoubleSide });
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uDim = { value: new THREE.Vector3(imp.w, imp.h, imp.y0) };
+    sh.vertexShader = 'uniform vec3 uDim;\n' + sh.vertexShader.replace('#include <project_vertex>', `
+      vec4 c_ = modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+      float sx_ = length(instanceMatrix[0].xyz), sy_ = length(instanceMatrix[1].xyz);
+      vec3 tc_ = cameraPosition - c_.xyz; vec3 rt_ = normalize(vec3(tc_.z, 0.0, -tc_.x));
+      vec3 wp_ = c_.xyz + rt_ * position.x * uDim.x * sx_ + vec3(0.0, (uDim.z + position.y * uDim.y) * sy_, 0.0);
+      vec4 mvPosition = viewMatrix * vec4(wp_, 1.0);
+      gl_Position = projectionMatrix * mvPosition;`);
+  };
+  mat.customProgramCacheKey = () => 'impostor';
+  return mat;
+}
+
 // ---------- chunked instancing ----------
 class Scatter {
   constructor(chunk) { this.chunk = chunk; this.groups = new Map(); }
@@ -195,7 +230,7 @@ class Scatter {
         if (g.c.length && part.tint !== false) mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(g.c), 3);
         mesh.castShadow = !!part.cast; mesh.receiveShadow = part.receive !== false;
         if (part.depth) mesh.customDepthMaterial = part.depth;
-        mesh.computeBoundingSphere();
+        mesh.computeBoundingSphere(); if (part.tall) mesh.boundingSphere.radius += 36;
         mesh.matrixAutoUpdate = false; mesh.userData.lod = part.lod;
         parent.add(mesh); meshes.push(mesh);
       }
@@ -213,8 +248,8 @@ const SPECIES = {
 };
 const loaded = (t) => new Promise((res) => { const chk = () => (t.image ? res() : setTimeout(chk, 30)); chk(); });
 
-export async function buildFlora(scene, tex, Q) {
-  const r = rng(2026), root = new THREE.Group(); scene.add(root);
+export async function buildFlora(scene, tex, Q, region, renderer, avoid = []) {
+  const r = rng(2026 + region.seed), root = new THREE.Group(); scene.add(root);
   const colliders = [];
   const loader = new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('models/'));
   const [rocks, grassModel] = await Promise.all([
@@ -241,7 +276,7 @@ export async function buildFlora(scene, tex, Q) {
     if (!leafCache.has(key)) {
       const map = getLeafTexture(kind);
       const mat = patchWind(new THREE.MeshLambertMaterial({ map, alphaTest: 0.5, side: THREE.DoubleSide }), { sway, flutter, mode: 'tree' });
-      if (kind === 'aspen') mat.color.setRGB(0.3, 0.7, 0.22);          // the photographed aspen is in autumn colour
+      if (kind === 'aspen') mat.color.setRGB(...region.aspen);          // the photographed aspen is in autumn colour
       leafCache.set(key, { mat, depth: new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map, alphaTest: 0.5, side: THREE.DoubleSide }) });
     }
     return leafCache.get(key);
@@ -254,14 +289,18 @@ export async function buildFlora(scene, tex, Q) {
   for (const [name, sp] of Object.entries(SPECIES)) {
     sp.presets.forEach((preset, v) => {
       const o = TreePreset[preset], ts = o.bark.textureScale, wood = barkMat(o.bark.type, ts.x, 1 / ts.y), leaf = leafMat(o.leaves.type, sp.sway, sp.flutter);
-      const parts = [];
-      const small = name === 'bush' || name === 'young';
-      for (const far of Q.lodDist > 0 ? [0, 1] : [1]) {
-        const t = growTree(preset, 1000 + v * 77 + name.length, far ? 2 : small ? 1 : 0, sp.h[v]);
-        const tag = Q.lodDist > 0 ? (far ? 'lo' : 'hi') : undefined, lod = far;
-        parts.push({ geo: t.wood, mat: wood, cast: true, tint: false, lod: tag }, { geo: t.leaves, mat: leaf.mat, depth: leaf.depth, cast: true, lod: tag });
-        radius[name + v] = t.radius; budget[name + v + (lod ? 'lo' : 'hi')] = t.tris;
+      const parts = [], small = name === 'bush' || name === 'young', height = sp.h[v] * (small ? 1 : region.hMul);
+      const seed = 1000 + v * 77 + name.length + region.seed * 13;
+      const far = growTree(preset, seed, 2, height);
+      const farParts = [{ geo: far.wood, mat: wood, cast: true, tint: false, lod: 'lo' }, { geo: far.leaves, mat: leaf.mat, depth: leaf.depth, cast: true, lod: 'lo' }];
+      if (Q.lodDist > 0) {
+        const near = growTree(preset, seed, small ? 1 : 0, height);
+        parts.push({ geo: near.wood, mat: wood, cast: true, tint: false, lod: 'hi' }, { geo: near.leaves, mat: leaf.mat, depth: leaf.depth, cast: true, lod: 'hi' });
+        budget[name + v + 'hi'] = near.tris;
       }
+      parts.push(...farParts);
+      if (name !== 'bush') parts.push({ geo: impostorGeo, mat: impostorMat(captureImpostor(renderer, farParts)), lod: 'imp', receive: false, tall: true });
+      radius[name + v] = far.radius; budget[name + v + 'lo'] = far.tris;
       defs[name + v] = parts;
     });
   }
@@ -285,6 +324,8 @@ export async function buildFlora(scene, tex, Q) {
     sc.add(key, m.compose(p, q, s), c);
   };
 
+  const blocked = (x, z, rad) => avoid.some((a) => (a.x - x) ** 2 + (a.z - z) ** 2 < rad * rad);
+  for (const a of avoid) colliders.push({ x: a.x, z: a.z, r: 0.25 });
   // --- trees ---
   const trees = new Scatter(50), E = 250, cell = Q.treeCell;
   for (let gx = -E; gx < E; gx += cell) for (let gz = -E; gz < E; gz += cell) {
@@ -292,25 +333,25 @@ export async function buildFlora(scene, tex, Q) {
     if (h < 0.55) continue;
     const dens = forestDensity(x, z), cl = clearingFactor(x, z);
     if (cl > 0.35 && r() > 0.004) continue;
-    if (r() > 0.2 + 0.8 * dens) continue;
+    if (r() > 0.2 + 0.8 * dens || blocked(x, z, 3.6)) continue;
     const con = coniferness(x, z), v = (r() * 3) | 0, edge = h < 2 || dens < 0.45;
-    const young = r() < 0.14;
-    const kind = young ? 'young' : r() < con * 0.9 ? 'spruce' : r() < (edge ? 0.5 : 0.14) ? 'birch' : 'oak';
+    const young = r() < region.young;
+    const kind = young ? 'young' : r() < con * 0.9 ? 'spruce' : r() < Math.min(0.9, region.birch * (edge ? 3 : 1)) ? 'birch' : 'oak';
     const sc = 0.8 + r() * 0.5, b = 0.6 + r() * 0.35;
-    col.setRGB(b * (0.92 + r() * 0.16), b, b * (0.85 + r() * 0.2));
+    col.setRGB(b * (0.92 + r() * 0.16) * region.leaf[0], b * region.leaf[1], b * (0.85 + r() * 0.2) * region.leaf[2]);
     place(trees, kind + v, x, z, sc, { lean: 0.06, sy: 0.92 + r() * 0.2, c: col, sink: young ? 0.2 : 1.3 });
     if (!young) colliders.push({ x, z, r: radius[kind + v] * sc + 0.3 });
   }
   // --- bushes, rocks, logs ---
-  for (let i = 0; i < Q.bushes; i++) {
+  for (let i = 0; i < Q.bushes * region.bushMul; i++) {
     const x = (r() - 0.5) * 420, z = (r() - 0.5) * 420;
-    if (heightAt(x, z) < 0.5 || clearingFactor(x, z) > 0.7 || r() > 0.35 + forestDensity(x, z) * 0.5) continue;
-    const b = 0.55 + r() * 0.3; col.setRGB(b, b, b * 0.9);
+    if (blocked(x, z, 2.6) || heightAt(x, z) < 0.5 || clearingFactor(x, z) > 0.7 || r() > 0.35 + forestDensity(x, z) * 0.5) continue;
+    const b = 0.55 + r() * 0.3; col.setRGB(b * region.leaf[0], b * region.leaf[1], b * 0.9 * region.leaf[2]);
     place(trees, 'bush' + ((r() * 3) | 0), x, z, 0.6 + r() * 0.7, { sink: 0.05, c: col });
   }
   for (let i = 0; i < Q.rocks; i++) {
     const x = (r() - 0.5) * 400, z = (r() - 0.5) * 400, big = r() < 0.12;
-    if (heightAt(x, z) < -0.6) continue;
+    if (heightAt(x, z) < -0.6 || blocked(x, z, 3)) continue;
     const sc = big ? 0.9 + r() * 1.3 : 0.15 + r() * 0.45, b = 0.7 + r() * 0.3; col.setRGB(b, b, b);
     place(trees, 'rock' + ((r() * 3) | 0), x, z, sc, { sink: sc * 0.35, lean: 0.5, sy: 0.7 + r() * 0.5, c: col });
     if (sc > 0.8) colliders.push({ x, z, r: sc * 0.85 });
@@ -327,11 +368,11 @@ export async function buildFlora(scene, tex, Q) {
   const treeMeshes = trees.build(defs, root);
   const lodCull = treeMeshes.map((mesh) => ({ mesh, lod: mesh.userData.lod, c: mesh.boundingSphere.center.clone(), rad: mesh.boundingSphere.radius }));
 
-  const grassTint = (b, dry) => col.setRGB(b * (0.17 + dry * 0.13), b * 0.36, b * 0.07);
+  const GH = region.grassHue, grassTint = (b, dry) => col.setRGB(b * (GH[0] + dry * 0.13), b * GH[1], b * GH[2]);
   // --- ground cover (distance-culled chunks) ---
   const cover = new Scatter(40);
   const area = 400 * 400;
-  for (let i = 0; i < area * Q.grass; i++) {
+  for (let i = 0; i < area * Q.grass * region.grassMul; i++) {
     const x = (r() - 0.5) * 400, z = (r() - 0.5) * 400, h = heightAt(x, z);
     if (h < 0.12) continue;
     const open = Math.max(clearingFactor(x, z), 1 - forestDensity(x, z));
@@ -346,10 +387,10 @@ export async function buildFlora(scene, tex, Q) {
     place(cover, 'grass', x, z, 0.8 + r() * 0.7, { sink: 0.03, sy: 0.8 + r() * 0.8, c: col });
     if (r() < 0.05) place(cover, 'flower' + ((r() * 4) | 0), x + r() - 0.5, z + r() - 0.5, 0.55 + r() * 0.5, { lean: 0.3 });
   }
-  for (let i = 0; i < area * Q.ferns; i++) {
+  for (let i = 0; i < area * Q.ferns * region.underMul; i++) {
     const x = (r() - 0.5) * 400, z = (r() - 0.5) * 400, h = heightAt(x, z);
     if (h < 0.25 || r() > forestDensity(x, z) * 0.9 + 0.08) continue;
-    const b = 0.55 + r() * 0.35; col.setRGB(b, b, b * 0.9);
+    const b = 0.55 + r() * 0.35; col.setRGB(b * region.leaf[0], b * region.leaf[1], b * 0.9 * region.leaf[2]);
     place(cover, 'sprig' + ((r() * 3) | 0), x, z, 0.45 + r() * 0.75, { sink: 0.02, lean: 0.2, c: col });
   }
   for (let i = 0; i < 1400; i++) {         // reeds of tall grass around the pond
@@ -380,11 +421,11 @@ export async function buildFlora(scene, tex, Q) {
     budget,
     update(cam) {
       for (const c of coverCull) c.mesh.visible = c.c.distanceTo(cam) - c.rad < Q.coverDist;
-      for (const c of lodCull) {       // beyond the mist nothing is drawn; close up the detailed shapes take over
+      for (const c of lodCull) {       // detailed shape up close, light shape further out, a picture in the mist
         const d = c.c.distanceTo(cam);
         if (d - c.rad > Q.treeFar) { c.mesh.visible = false; continue; }
-        const near = d - c.rad * 0.6 < Q.lodDist;
-        c.mesh.visible = !c.lod || (c.lod === 'hi' ? near : !near);
+        const dn = Math.max(0, d - c.rad * 0.6);
+        c.mesh.visible = c.lod === 'hi' ? dn < Q.lodDist : c.lod === 'lo' ? dn >= Q.lodDist && dn < Q.impDist : c.lod === 'imp' ? dn >= Q.impDist : true;
       }
     },
   };

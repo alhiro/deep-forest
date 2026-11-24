@@ -24,10 +24,17 @@ export function trailDist(x, z) {
   return lerp(lerp(trailField[o], trailField[o + 1], u), lerp(trailField[o + TG], trailField[o + TG + 1], u), v);
 }
 
+// Region settings: a seed offset reshapes the land; the rest biases the forest.
+const R = { ox: 0, oz: 0, conMul: 1, conAdd: 0, densAdd: 0, ground: [0.86, 0.96, 0.84] };
+export function setRegionTerrain(cfg) {
+  R.ox = cfg.seed * 913.7; R.oz = cfg.seed * 517.3;
+  R.conMul = cfg.conMul; R.conAdd = cfg.conAdd; R.densAdd = cfg.densAdd; R.ground = cfg.ground;
+}
+
 // Single source of truth for the ground. Water sits at y = 0.
 export function heightAt(x, z) {
-  let h = (fbm(x * 0.0075 + 11.3, z * 0.0075 + 4.7, 5, 1) - 0.33) * 34;
-  h += (fbm(x * 0.045, z * 0.045, 3, 7) - 0.5) * 1.8;
+  let h = (fbm(x * 0.0075 + 11.3 + R.ox, z * 0.0075 + 4.7 + R.oz, 5, 1) - 0.33) * 34;
+  h += (fbm(x * 0.045 + R.ox, z * 0.045 + R.oz, 3, 7) - 0.5) * 1.8;
   const dc = Math.hypot(x - CLEARING.x, z - CLEARING.z);
   const c = smoothstep(CLEARING.r + 26, CLEARING.r - 8, dc);
   h = lerp(h, 2.4 + (fbm(x * 0.03, z * 0.03, 2, 9) - 0.5) * 1.4, c);
@@ -43,12 +50,12 @@ export function clearingFactor(x, z) {
 }
 // 0 = open, 1 = dense old forest
 export function forestDensity(x, z) {
-  const n = fbm(x * 0.011 + 3.1, z * 0.011 + 8.2, 3, 21);
+  const n = fbm(x * 0.011 + 3.1 + R.ox, z * 0.011 + 8.2 + R.oz, 3, 21) + R.densAdd;
   return clamp(smoothstep(0.28, 0.62, n) * (1 - clearingFactor(x, z)), 0, 1);
 }
 // 0 = broadleaf, 1 = conifer
 export function coniferness(x, z) {
-  return smoothstep(0.42, 0.58, fbm(x * 0.006 + 40, z * 0.006 - 13, 3, 33));
+  return clamp(smoothstep(0.42, 0.58, fbm(x * 0.006 + 40 + R.ox, z * 0.006 - 13 + R.oz, 3, 33)) * R.conMul + R.conAdd, 0, 1);
 }
 
 export function buildTerrain(tex, segs) {
@@ -66,7 +73,7 @@ export function buildTerrain(tex, segs) {
     // the photographs carry the colour; vertex colour only shades: damp ground, trodden trail, canopy shade
     let v = lerp(1.25, 0.85, dens) * lerp(0.85, 1.15, fbm(x * 0.3, z * 0.3, 2, 12));
     v *= lerp(1, 0.55, Math.max(wet, tr * 0.5));
-    col[i * 3] = v * 0.86; col[i * 3 + 1] = v * 0.96; col[i * 3 + 2] = v * lerp(0.84, 0.7, wet);
+    col[i * 3] = v * R.ground[0]; col[i * 3 + 1] = v * R.ground[1]; col[i * 3 + 2] = v * R.ground[2] * lerp(1, 0.84, wet);
     grassy[i] = clamp(Math.max(cl * 1.1, (1 - dens) * 0.75) + (n - 0.5) * 0.7 - wet * 0.6 - tr - smoothstep(0.85, 0.65, nor.getY(i)), 0, 1);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));

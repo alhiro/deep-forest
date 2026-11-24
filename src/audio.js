@@ -1,7 +1,7 @@
 // Forest soundscape synthesised live with Web Audio: wind in the canopy, birdsong,
 // water near the ponds, hooves when the herd passes, and your own footsteps.
 export class ForestAudio {
-  constructor() { this.ctx = null; this.muted = false; }
+  constructor(region) { this.ctx = null; this.muted = false; this.insects = region.insects; this.birdBase = region.birdBase; }
   start() {
     if (this.ctx) { this.ctx.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
@@ -21,6 +21,10 @@ export class ForestAudio {
     this.wind = loop('lowpass', 320, 0.4, 0.16);
     this.leaves = loop('bandpass', 3800, 0.5, 0.035);
     this.water = loop('bandpass', 1300, 0.9, 0);
+    if (this.insects > 0) {                 // tropical insect chorus: a high band pulsed quickly
+      const ins = loop('bandpass', 5600, 6, 0.011 * this.insects), lfo = ctx.createOscillator(), depth = ctx.createGain();
+      lfo.frequency.value = 43; depth.gain.value = 0.009 * this.insects; lfo.connect(depth).connect(ins.g.gain); lfo.start();
+    }
     this.hooves = ctx.createGain(); this.hooves.gain.value = 0; this.hooves.connect(this.master);
     this.t = 0; this.nextBird = 2; this.nextHoof = 0;
   }
@@ -35,7 +39,7 @@ export class ForestAudio {
       g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v * vol, t + dur * 0.2); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
       o.connect(g).connect(p); o.start(t); o.stop(t + dur + 0.02);
     };
-    const base = 2200 + Math.random() * 2400;
+    const base = this.birdBase * 0.85 + Math.random() * this.birdBase;
     if (kind === 0) { const n = 3 + ((Math.random() * 5) | 0); for (let i = 0; i < n; i++) note(t0 + i * 0.13, base, base * (1.25 + Math.random() * 0.3), 0.09, 0.05); }
     else if (kind === 1) { for (let i = 0; i < 9; i++) note(t0 + i * 0.055, base * 1.2, base * 0.9, 0.04, 0.04); }
     else if (kind === 2) { note(t0, 780, 760, 0.28, 0.07); note(t0 + 0.42, 620, 600, 0.36, 0.07); }      // cuckoo

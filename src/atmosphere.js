@@ -5,17 +5,26 @@ import { heightAt, forestDensity } from './terrain.js';
 
 export const SUN = new THREE.Vector3(-0.52, 0.6, -0.61).normalize();
 export const FOG_COLOR = new THREE.Color().setRGB(0.66, 0.76, 0.68, THREE.SRGBColorSpace);
-const SUN_COLOR = new THREE.Color().setRGB(1.0, 0.86, 0.66, THREE.SRGBColorSpace);
+export const SUN_COLOR = new THREE.Color().setRGB(1.0, 0.86, 0.66, THREE.SRGBColorSpace);
 const TAIL = '\n#include <tonemapping_fragment>\n#include <colorspace_fragment>\n';
 
-export function buildAtmosphere(scene, tex, Q) {
+export const SKY = { zenith: new THREE.Vector3(0.2, 0.42, 0.76), horizon: new THREE.Vector3(0.62, 0.76, 0.9) };
+// Call before anything is built: every module shares these objects.
+export function setRegionLight(cfg) {
+  SUN.set(...cfg.sun).normalize();
+  FOG_COLOR.setRGB(...cfg.fog, THREE.SRGBColorSpace);
+  SUN_COLOR.setRGB(...cfg.sunColor, THREE.SRGBColorSpace);
+  SKY.zenith.set(...cfg.zenith); SKY.horizon.set(...cfg.horizon);
+}
+
+export function buildAtmosphere(scene, tex, Q, region) {
   const time = { value: 0 };
-  scene.fog = new THREE.FogExp2(FOG_COLOR, 0.0135);
+  scene.fog = new THREE.FogExp2(FOG_COLOR, region.fogDensity);
   scene.background = FOG_COLOR;
 
   // --- lights ---
-  const hemi = new THREE.HemisphereLight(0xb8d2e6, 0x5e6a48, 1.5);
-  const sun = new THREE.DirectionalLight(SUN_COLOR, 4.0);
+  const hemi = new THREE.HemisphereLight(region.hemiSky, region.hemiGround, region.hemiPower);
+  const sun = new THREE.DirectionalLight(SUN_COLOR, region.sunPower);
   sun.castShadow = true;
   sun.shadow.mapSize.set(Q.shadow, Q.shadow);
   const R = Q.shadowRange, cam = sun.shadow.camera;
@@ -26,15 +35,15 @@ export function buildAtmosphere(scene, tex, Q) {
   // --- sky dome ---
   const sky = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 16), new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { uSun: { value: SUN }, uFog: { value: FOG_COLOR }, uSunCol: { value: SUN_COLOR }, uTime: time },
+    uniforms: { uSun: { value: SUN }, uFog: { value: FOG_COLOR }, uSunCol: { value: SUN_COLOR }, uTime: time, uZen: { value: SKY.zenith }, uHor: { value: SKY.horizon } },
     vertexShader: 'varying vec3 vD; void main(){ vD = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-    fragmentShader: `varying vec3 vD; uniform vec3 uSun, uFog, uSunCol; uniform float uTime;
+    fragmentShader: `varying vec3 vD; uniform vec3 uSun, uFog, uSunCol, uZen, uHor; uniform float uTime;
       float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
       float n(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(h(i),h(i+vec2(1,0)),f.x), mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x), f.y); }
       float fb(vec2 p){ float a=0.5,s=0.0; for(int i=0;i<5;i++){ s+=a*n(p); p*=2.03; a*=0.5; } return s; }
       void main(){
         vec3 d = normalize(vD); float y = max(d.y, 0.0);
-        vec3 col = mix(vec3(0.62,0.76,0.90), vec3(0.20,0.42,0.76), pow(y, 0.55));
+        vec3 col = mix(uHor, uZen, pow(y, 0.55));
         vec2 cp = d.xz / (d.y + 0.25) * 1.3 + uTime * 0.006;
         float c = smoothstep(0.48, 0.78, fb(cp)) * smoothstep(0.02, 0.3, d.y);
         col = mix(col, vec3(1.0, 0.97, 0.92), c * 0.85);

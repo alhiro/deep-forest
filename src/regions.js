@@ -1,0 +1,60 @@
+// The six forests. Each one reshapes the same engine: terrain seed, tree mix,
+// light, mist, ground colour, sound and which live animals roam.
+// Colours are sRGB triples. `sun` is the direction TO the sun.
+export const REGIONS = {
+  amazon: {
+    nama: 'Amazon', benua: 'Amerika Selatan', hutan: 'Hutan hujan Amazon, Brasil',
+    blurb: 'Hutan hujan terluas di dunia: kanopi rapat, udara lembap, dan sungai di mana-mana.',
+    seed: 3, conMul: 0, conAdd: 0, densAdd: 0.12, birch: 0.04, hMul: 1.22, young: 0.2, bushMul: 1.8, underMul: 2.4, grassMul: 0.6,
+    leaf: [0.78, 1.0, 0.7], aspen: [0.3, 0.7, 0.22], ground: [0.8, 0.86, 0.7], grassHue: [0.16, 0.4, 0.07],
+    fog: [0.6, 0.74, 0.62], fogDensity: 0.0175, sun: [-0.35, 0.86, -0.36], sunColor: [1.0, 0.93, 0.78], sunPower: 4.0,
+    hemiSky: 0xbfe0d2, hemiGround: 0x54683f, hemiPower: 1.55, zenith: [0.22, 0.46, 0.72], horizon: [0.66, 0.8, 0.82],
+    insects: 0.9, birdBase: 2600, live: { parrot: 'macaw', butterflies: 1.6 },
+  },
+  sumatra: {
+    nama: 'Sumatra', benua: 'Asia', hutan: 'Hutan hujan Leuser, Sumatra, Indonesia',
+    blurb: 'Satu-satunya tempat harimau, orangutan, gajah, dan badak hidup di hutan yang sama.',
+    seed: 7, conMul: 0, conAdd: 0, densAdd: 0.1, birch: 0.06, hMul: 1.28, young: 0.2, bushMul: 1.7, underMul: 2.2, grassMul: 0.55,
+    leaf: [0.74, 0.98, 0.72], aspen: [0.3, 0.7, 0.22], ground: [0.78, 0.82, 0.68], grassHue: [0.15, 0.38, 0.08],
+    fog: [0.64, 0.74, 0.68], fogDensity: 0.019, sun: [0.42, 0.8, -0.42], sunColor: [1.0, 0.9, 0.74], sunPower: 3.8,
+    hemiSky: 0xc4dcd4, hemiGround: 0x4f6240, hemiPower: 1.55, zenith: [0.26, 0.46, 0.7], horizon: [0.7, 0.8, 0.8],
+    insects: 1.0, birdBase: 2300, live: { butterflies: 1.4 },
+  },
+  kongo: {
+    nama: 'Kongo', benua: 'Afrika', hutan: 'Hutan hujan Cekungan Kongo, Afrika Tengah',
+    blurb: 'Hutan hujan terluas kedua di dunia, rumah gorila, okapi, dan gajah hutan.',
+    seed: 11, conMul: 0, conAdd: 0, densAdd: 0.08, birch: 0.03, hMul: 1.25, young: 0.18, bushMul: 1.6, underMul: 2.0, grassMul: 0.7,
+    leaf: [0.82, 0.98, 0.66], aspen: [0.3, 0.7, 0.22], ground: [0.9, 0.8, 0.64], grassHue: [0.2, 0.4, 0.07],
+    fog: [0.7, 0.76, 0.64], fogDensity: 0.0165, sun: [-0.5, 0.74, 0.44], sunColor: [1.0, 0.88, 0.68], sunPower: 4.1,
+    hemiSky: 0xcfdcc8, hemiGround: 0x5c6440, hemiPower: 1.5, zenith: [0.3, 0.48, 0.7], horizon: [0.76, 0.8, 0.74],
+    insects: 0.8, birdBase: 2000, live: { parrot: 'grey', butterflies: 1.3 },
+  },
+  amerikautara: {
+    nama: 'Amerika Utara', benua: 'Amerika Utara', hutan: 'Hutan konifer dan boreal, Kanada–Pasifik Barat Laut',
+    blurb: 'Hutan pinus dan cemara yang sejuk, wilayah beruang, serigala, dan berang-berang.',
+    seed: 19, conMul: 0.6, conAdd: 0.72, densAdd: 0.02, birch: 0.3, hMul: 1.12, young: 0.16, bushMul: 0.8, underMul: 0.8, grassMul: 0.9,
+    leaf: [0.9, 0.98, 0.88], aspen: [0.5, 0.74, 0.2], ground: [0.84, 0.92, 0.84], grassHue: [0.2, 0.36, 0.08],
+    fog: [0.68, 0.76, 0.8], fogDensity: 0.0125, sun: [0.56, 0.5, -0.66], sunColor: [1.0, 0.86, 0.7], sunPower: 3.9,
+    hemiSky: 0xb6cfe8, hemiGround: 0x66705a, hemiPower: 1.75, zenith: [0.18, 0.4, 0.76], horizon: [0.66, 0.78, 0.9],
+    insects: 0, birdBase: 3000, live: { fox: true, butterflies: 0.5 },
+  },
+  eropa: {
+    nama: 'Eropa', benua: 'Eropa', hutan: 'Hutan purba Białowieża, Polandia–Belarus',
+    blurb: 'Sisa hutan dataran rendah purba Eropa, tempat bison Eropa diselamatkan dari kepunahan.',
+    seed: 0, conMul: 1, conAdd: 0, densAdd: 0, birch: 0.14, hMul: 1, young: 0.14, bushMul: 1, underMul: 1, grassMul: 1,
+    leaf: [1, 1, 1], aspen: [0.3, 0.7, 0.22], ground: [0.86, 0.96, 0.84], grassHue: [0.17, 0.36, 0.07],
+    fog: [0.66, 0.76, 0.68], fogDensity: 0.0135, sun: [-0.52, 0.6, -0.61], sunColor: [1.0, 0.86, 0.66], sunPower: 4.0,
+    hemiSky: 0xb8d2e6, hemiGround: 0x5e6a48, hemiPower: 1.5, zenith: [0.2, 0.42, 0.76], horizon: [0.62, 0.76, 0.9],
+    insects: 0, birdBase: 2400, live: { horse: true, stork: true, butterflies: 1 },
+  },
+  australia: {
+    nama: 'Australia', benua: 'Australia', hutan: 'Hutan eukaliptus dan hutan basah Australia Timur',
+    blurb: 'Hutan terbuka berbatang pucat, tanah kemerahan, dan satwa berkantong yang tidak ada di benua lain.',
+    seed: 23, conMul: 0, conAdd: 0, densAdd: -0.06, birch: 0.62, hMul: 1.15, young: 0.1, bushMul: 0.9, underMul: 0.7, grassMul: 1.2,
+    leaf: [0.92, 0.94, 0.8], aspen: [0.42, 0.56, 0.3], ground: [1.12, 0.84, 0.62], grassHue: [0.3, 0.36, 0.1],
+    fog: [0.8, 0.8, 0.72], fogDensity: 0.0105, sun: [0.46, 0.72, 0.52], sunColor: [1.0, 0.9, 0.72], sunPower: 4.4,
+    hemiSky: 0xcfe0f0, hemiGround: 0x7a6a4a, hemiPower: 1.6, zenith: [0.2, 0.46, 0.84], horizon: [0.78, 0.84, 0.88],
+    insects: 0.45, birdBase: 1700, live: { butterflies: 0.7 },
+  },
+};
+export const REGION_ORDER = ['amazon', 'sumatra', 'kongo', 'amerikautara', 'eropa', 'australia'];

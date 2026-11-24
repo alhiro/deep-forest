@@ -23,11 +23,11 @@ function smooth(geo, dropColor) {
   return m;
 }
 
-export async function buildFauna(scene, Q, onProgress) {
+export async function buildFauna(scene, Q, region) {
   const loader = new GLTFLoader(), r = rng(4242);
-  const load = (n) => loader.loadAsync(`models/${n}.glb`).catch(() => null);
-  const [fox, horse, stork, parrot] = await Promise.all(['Fox', 'Horse', 'Stork', 'Parrot'].map(load));
-  onProgress && onProgress();
+  const L = region.live, live = [];
+  const load = (n, want) => (want ? loader.loadAsync(`models/${n}.glb`).catch(() => null) : null);
+  const [fox, horse, stork, parrot] = await Promise.all([load('Fox', L.fox), load('Horse', L.horse), load('Stork', L.stork), load('Parrot', L.parrot)]);
   const updaters = [], foxes = [];
   if (fox) fox.scene.traverse((o) => { if (o.isSkinnedMesh) { o.geometry = smooth(o.geometry, false); o.material.roughness = 0.9; } });
   for (const g of [horse, stork, parrot]) if (g) { const m = g.scene.children[0]; m.geometry = smooth(m.geometry, g === horse); m.material.flatShading = false; m.material.vertexColors = g !== horse; m.material.roughness = 0.85; m.material.needsUpdate = true; }
@@ -41,7 +41,7 @@ export async function buildFauna(scene, Q, onProgress) {
       const mixer = new THREE.AnimationMixer(obj), act = {};
       for (const c of fox.animations) { act[c.name] = mixer.clipAction(c); act[c.name].play(); act[c.name].setEffectiveWeight(0); }
       const f = { obj, x: hx, z: hz, hx, hz, heading: r() * 6.283, speed: 0, state: 'idle', timer: 1 + r() * 4, tx: hx, tz: hz, w: { Survey: 1, Walk: 0, Run: 0 } };
-      foxes.push(f);
+      foxes.push(f); live.push({ id: 'redfox', range: 28, cone: 0.985, pos: obj.position, lift: 0.3 });
       const dry = (x, z) => heightAt(x, z) > 0.25;
       updaters.push((dt, player) => {
         const dp = Math.hypot(player.x - f.x, player.z - f.z);
@@ -86,7 +86,7 @@ export async function buildFauna(scene, Q, onProgress) {
       const mesh = src.clone();
       mesh.material = src.material.clone(); mesh.material.color = new THREE.Color(coats[i % coats.length]); mesh.material.roughness = 0.75;
       mesh.scale.setScalar(0.0088 * (0.92 + r() * 0.16)); mesh.castShadow = true; mesh.frustumCulled = false;
-      scene.add(mesh);
+      scene.add(mesh); live.push({ id: 'konik', range: 45, cone: 0.975, pos: mesh.position, lift: 1 });
       const mixer = new THREE.AnimationMixer(mesh), a = mixer.clipAction(horse.animations[0]);
       a.play(); a.time = r(); const rate = 1.15 + r() * 0.2;
       const back = 3.2 * i + r() * 1.5, side = (i % 2 ? 1 : -1) * (0.8 + r() * 1.6);
@@ -104,9 +104,11 @@ export async function buildFauna(scene, Q, onProgress) {
   }
 
   // ---------- birds ----------
-  const addBird = (gltf, scale, path, rate) => {
+  const addBird = (gltf, scale, path, rate, id, range, grey) => {
     if (!gltf) return;
-    const mesh = gltf.scene.children[0].clone(); mesh.scale.setScalar(scale); mesh.frustumCulled = false; mesh.castShadow = true;
+    const mesh = gltf.scene.children[0].clone();
+    if (grey) { mesh.material = mesh.material.clone(); mesh.material.vertexColors = false; mesh.material.color.set(0x8d9096); }
+    live.push({ id, range, cone: 0.985, pos: mesh.position, lift: 0 }); mesh.scale.setScalar(scale); mesh.frustumCulled = false; mesh.castShadow = true;
     scene.add(mesh);
     const mixer = new THREE.AnimationMixer(mesh), a = mixer.clipAction(gltf.animations[0]); a.play(); a.time = r();
     let t = r() * 100; const p = new THREE.Vector3(), q = new THREE.Vector3();
@@ -120,15 +122,15 @@ export async function buildFauna(scene, Q, onProgress) {
   };
   for (let i = 0; i < Q.birds; i++) {
     const cx = lerp(CLEARING.x, POND.x, r()), cz = lerp(CLEARING.z, POND.z, r()), rad = 35 + r() * 45, alt = 34 + r() * 14, w = (r() < 0.5 ? -1 : 1) * (7.5 / rad), ph = r() * 6.283;
-    addBird(stork, 0.011, (t, o) => o.set(cx + Math.cos(t * w + ph) * rad, alt + Math.sin(t * 0.2 + ph) * 3, cz + Math.sin(t * w + ph) * rad), 0.8);
+    addBird(stork, 0.011, (t, o) => o.set(cx + Math.cos(t * w + ph) * rad, alt + Math.sin(t * 0.2 + ph) * 3, cz + Math.sin(t * w + ph) * rad), 0.8, 'whitestork', 110);
   }
   for (let i = 0; i < Q.birds + 2; i++) {
     const ph = r() * 6.283, a = 16 + r() * 16, b = 10 + r() * 12, alt = 5 + r() * 5, w = 0.32 + r() * 0.12, ox = (r() - 0.5) * 8;
-    addBird(parrot, 0.0075, (t, o) => o.set(CLEARING.x + ox + Math.sin(t * w + ph) * a, alt + Math.sin(t * 0.9 + ph) * 1.6 + 2.4, CLEARING.z + Math.sin(t * w * 2 + ph * 2) * b), 1.6);
+    addBird(parrot, 0.0075, (t, o) => o.set(CLEARING.x + ox + Math.sin(t * w + ph) * a, alt + Math.sin(t * 0.9 + ph) * 1.6 + 2.4, CLEARING.z + Math.sin(t * w * 2 + ph * 2) * b), 1.6, L.parrot === 'grey' ? 'greyparrot' : 'macaw', 45, L.parrot === 'grey');
   }
 
   // ---------- butterflies ----------
-  const NB = Q.butterflies, wing = new THREE.BufferGeometry();
+  const NB = Math.max(1, Math.round(Q.butterflies * (L.butterflies || 1))), wing = new THREE.BufferGeometry();
   wing.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, -0.03, 0.07, 0, -0.06, 0.08, 0, 0.03, 0, 0, 0.04, 0, 0, -0.03, -0.07, 0, -0.06, -0.08, 0, 0.03, 0, 0, 0.04], 3));
   wing.setIndex([0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6]);
   wing.setAttribute('aPhase', new THREE.InstancedBufferAttribute(Float32Array.from({ length: NB }, () => r() * 6.283), 1));
@@ -161,5 +163,5 @@ export async function buildFauna(scene, Q, onProgress) {
     flies.instanceMatrix.needsUpdate = true;
   });
 
-  return { foxes, herd, update(dt, player) { for (const u of updaters) u(dt, player); } };
+  return { foxes, herd, live, hasHerd: !!(horse && L.horse), update(dt, player) { for (const u of updaters) u(dt, player); } };
 }
