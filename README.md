@@ -6,6 +6,18 @@ with foxes that bolt when you get close, a herd of wild horses that gallops the 
 Inspired by [Abyssal Garden](https://github.com/Noniv/abyssal-garden). Built with three.js (WebGL 2), so it
 runs in Chrome, Edge, Firefox and Safari.
 
+## Six forests and a field guide
+
+Pick a forest on the start screen: Amazon, Sumatra, Congo, North America, Europe or Australia. Each one changes
+the terrain seed, tree mix, light, mist, ground colour and sound (`src/regions.js`).
+
+Every forest has six species (`src/species.js`), each with an observation board in the world. Walk up to a board,
+or aim at a live animal, and press **E** to open its card: size, habitat, diet, reproduction, behaviour and
+conservation status, with a photograph loaded from Wikipedia at run time (`src/guide.js`). **J** opens the field
+journal; progress is kept in `localStorage`. The interface text is Indonesian.
+
+Only four species have moving 3D models (red fox, Konik horse, white stork, parrot). The rest are boards.
+
 ## Run it
 
 ```bash
@@ -26,6 +38,8 @@ Live: https://alhiro.github.io/deep-forest/
 | Mouse | look |
 | Shift | run |
 | Space | hop |
+| E / click | observe the animal or board you are aiming at |
+| J | field journal |
 | 1 – 6 | jump to a place |
 | M / H / Esc | mute / stats / menu |
 
@@ -46,12 +60,15 @@ with the ez-tree generator and textured with photographs; rocks and the grass tu
 | `src/fauna.js` | Fox behaviour, horse herd, birds, butterflies. |
 | `src/player.js` | Damped first-person walking, terrain following, trunk collision, touch. |
 | `src/audio.js` | Wind, birdsong, water, hooves and footsteps, synthesised with Web Audio. |
-| `src/main.js` | Renderer, detail levels, adaptive resolution, menu, viewpoints. |
+| `src/main.js` | Renderer, detail levels, adaptive resolution, menu, viewpoints, interaction and cards. |
+| `src/regions.js`, `src/species.js`, `src/guide.js` | The six forests, the 36 species, and the observation boards. |
 
 Detail levels (Low / Medium / High) change tree density, undergrowth, shadow size and post-processing.
 If the frame rate drops below about 45 fps the render resolution is lowered in small steps.
 
-Testing helpers: `?q=low|medium|high`, `?vp=1..6`, `?auto=1` (skip the menu).
+Far trees are drawn as impostors: one camera-facing picture per tree, captured from the real tree at load.
+
+Testing helpers: `?r=amazon|sumatra|kongo|amerikautara|eropa|australia`, `?q=low|medium|high`, `?vp=1..6`, `?auto=1` (skip the menu).
 
 ## Credits
 

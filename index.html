@@ -1,82 +1,134 @@
 <!doctype html>
-<html lang="en">
+<html lang="id">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Deep Forest</title>
+<title>Deep Forest — jelajah hutan dunia</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Cpath d=%27M8 1 3 9h3l-3 4h4v2h2v-2h4l-3-4h3z%27 fill=%27%234f8a3a%27/%3E%3C/svg%3E">
-<meta name="description" content="Walk through a procedurally grown old forest with foxes, wild horses and birds. Runs in the browser.">
+<meta name="description" content="Jelajahi enam hutan dunia di browser dan kenali satwanya: Amazon, Sumatra, Kongo, Amerika Utara, Eropa, dan Australia.">
 <style>
-  :root { --ink:#eef3e6; --dim:#b9c7ad; --leaf:#b7d77a; --bark:#0d140c; }
+  :root { --ink:#eef3e6; --dim:#b9c7ad; --leaf:#b7d77a; --paper:#f4eedd; --text:#22301c; --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
   * { box-sizing: border-box; }
   html, body { margin:0; height:100%; background:#0b110a; overflow:hidden; color:var(--ink);
     font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
   canvas#view { position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none; transition: filter .9s ease; }
-  body.menu canvas#view { filter: blur(7px) brightness(.62) saturate(.9); }
-  #menu { position:fixed; inset:0; display:none; align-items:center; justify-content:center; padding:24px;
-    background: radial-gradient(ellipse at 50% 40%, rgba(10,18,9,.15), rgba(6,10,5,.72)); }
-  body.menu #menu { display:flex; }
-  .card { width:min(560px, 100%); text-align:center; }
-  h1 { font-weight:400; font-size:clamp(44px, 9vw, 84px); letter-spacing:.02em; margin:0; line-height:1; text-wrap:balance;
-    text-shadow:0 2px 30px rgba(0,0,0,.5); }
-  h1 em { font-style:italic; color:var(--leaf); }
-  p.lede { color:var(--dim); font-size:18px; line-height:1.5; margin:18px auto 30px; max-width:30em; text-wrap:pretty; }
+  body.menu canvas#view { filter: blur(7px) brightness(.55) saturate(.9); }
   button { font:inherit; color:inherit; cursor:pointer; }
-  #enter { background:var(--leaf); color:#10200a; border:0; border-radius:999px; padding:15px 40px; font-size:20px;
-    letter-spacing:.03em; transition: transform .2s ease, background .2s ease; }
+  button:focus-visible, a:focus-visible { outline:2px solid #fff; outline-offset:3px; }
+
+  /* ---------- menu ---------- */
+  #menu { position:fixed; inset:0; display:none; overflow-y:auto; padding:28px 20px;
+    background: radial-gradient(ellipse at 50% 30%, rgba(10,18,9,.2), rgba(6,10,5,.78)); }
+  body.menu #menu { display:block; }
+  .wrap { width:min(880px, 100%); margin:0 auto; text-align:center; }
+  h1 { font-weight:400; font-size:clamp(40px, 8vw, 72px); letter-spacing:.02em; margin:8px 0 0; line-height:1; text-shadow:0 2px 30px rgba(0,0,0,.5); }
+  h1 em { font-style:italic; color:var(--leaf); }
+  p.lede { color:var(--dim); font-size:18px; line-height:1.5; margin:14px auto 22px; max-width:34em; text-wrap:pretty; }
+  #regions { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; text-align:left; }
+  @media (max-width:720px) { #regions { grid-template-columns:repeat(2, 1fr); } }
+  #regions button { background:rgba(14,22,12,.6); border:1px solid rgba(255,255,255,.16); border-radius:12px; padding:13px 14px 12px; text-align:left;
+    transition: border-color .2s ease, background .2s ease; }
+  #regions button:hover { border-color:rgba(255,255,255,.45); }
+  #regions button[aria-pressed="true"] { border-color:var(--leaf); background:rgba(60,84,36,.55); }
+  #regions .k { font-family:var(--sans); font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--dim); }
+  #regions .n { display:block; font-size:23px; margin:2px 0 3px; }
+  #regions .f { display:block; font-family:var(--sans); font-size:12.5px; line-height:1.4; color:var(--dim); min-height:2.8em; }
+  #regions .p { display:block; font-family:var(--sans); font-size:12px; margin-top:8px; color:var(--leaf); font-variant-numeric:tabular-nums; }
+  #enter { margin-top:22px; background:var(--leaf); color:#10200a; border:0; border-radius:999px; padding:14px 38px; font-size:20px; letter-spacing:.02em;
+    transition: transform .2s ease, background .2s ease; }
   #enter:hover { transform: translateY(-1px); background:#c9e690; }
-  #enter:focus-visible, .seg button:focus-visible { outline:2px solid #fff; outline-offset:3px; }
   #enter[disabled] { background:transparent; color:var(--dim); cursor:default; transform:none; }
-  #bar { height:2px; width:220px; margin:20px auto 0; background:rgba(255,255,255,.14); border-radius:2px; overflow:hidden; }
+  #bar { height:2px; width:220px; margin:16px auto 0; background:rgba(255,255,255,.14); border-radius:2px; overflow:hidden; }
   #bar i { display:block; height:100%; width:0; background:var(--leaf); transition: width .25s ease; }
-  .row { margin-top:30px; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size:13px; color:var(--dim); }
+  .row { margin-top:20px; font-family:var(--sans); font-size:13px; color:var(--dim); }
   .seg { display:inline-flex; margin-left:10px; border:1px solid rgba(255,255,255,.22); border-radius:999px; overflow:hidden; }
   .seg button { background:transparent; border:0; padding:7px 15px; font-size:13px; color:var(--dim); }
   .seg button[aria-pressed="true"] { background:rgba(255,255,255,.16); color:var(--ink); }
-  dl { display:grid; grid-template-columns:auto auto; gap:6px 18px; justify-content:center; margin:22px 0 0; text-align:left;
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size:13px; color:var(--dim); }
-  dt { color:var(--ink); font-variant-numeric: tabular-nums; } dd { margin:0; }
+  dl { display:grid; grid-template-columns:repeat(4, auto); gap:6px 16px; justify-content:center; margin:18px 0 0; text-align:left; font-family:var(--sans); font-size:13px; color:var(--dim); }
+  dt { color:var(--ink); } dd { margin:0 14px 0 0; }
   .touch { display:none; }
   @media (pointer: coarse) { dl { display:none; } .touch { display:block; } }
-  #note { margin-top:22px; font-family: ui-sans-serif, system-ui, sans-serif; font-size:12px; color:#8fa083; }
-  #note a { color:inherit; }
-  #stats { position:fixed; left:12px; top:10px; font:12px/1.5 ui-monospace, Menlo, Consolas, monospace; color:#e8f0dc;
-    background:rgba(8,14,7,.55); padding:8px 10px; border-radius:6px; display:none; white-space:pre; pointer-events:none; }
-  #place { position:fixed; left:50%; bottom:34px; transform:translateX(-50%); font-size:22px; font-style:italic; letter-spacing:.04em;
-    opacity:0; transition: opacity 1s ease; text-shadow:0 1px 14px rgba(0,0,0,.7); pointer-events:none; }
-  body.menu #place { opacity:0 !important; }
-  #fail { display:none; color:#ffd9c9; margin-top:18px; font-family: ui-sans-serif, system-ui, sans-serif; font-size:14px; }
+  #note { margin:18px auto 0; max-width:60em; font-family:var(--sans); font-size:11.5px; line-height:1.5; color:#8fa083; }
+  #fail { display:none; color:#ffd9c9; margin-top:14px; font-family:var(--sans); font-size:14px; }
+
+  /* ---------- in-world ---------- */
+  #hud { position:fixed; left:14px; top:12px; font-family:var(--sans); font-size:13px; padding:7px 12px; border-radius:999px; background:rgba(8,14,7,.5); display:none; }
+  #hud b { font-weight:600; } #hud span { color:var(--leaf); font-variant-numeric:tabular-nums; }
+  #dot { position:fixed; left:50%; top:50%; width:5px; height:5px; margin:-2.5px; border-radius:50%; background:rgba(255,255,255,.75); display:none; pointer-events:none; }
+  body.play #hud, body.play #dot { display:block; }
+  #prompt { position:fixed; left:50%; bottom:86px; transform:translateX(-50%); display:none; font-family:var(--sans); font-size:15px;
+    background:rgba(8,14,7,.72); border:1px solid rgba(255,255,255,.25); border-radius:999px; padding:9px 18px 9px 10px; white-space:nowrap; }
+  #prompt kbd { font:600 13px var(--sans); background:var(--leaf); color:#10200a; border-radius:6px; padding:3px 8px; margin-right:9px; }
+  #stats { position:fixed; right:12px; top:10px; font:12px/1.5 ui-monospace, Menlo, Consolas, monospace; color:#e8f0dc; background:rgba(8,14,7,.55);
+    padding:8px 10px; border-radius:6px; display:none; white-space:pre; pointer-events:none; }
+  #place { position:fixed; left:50%; bottom:34px; transform:translateX(-50%); font-size:22px; font-style:italic; letter-spacing:.04em; opacity:0;
+    transition: opacity 1s ease; text-shadow:0 1px 14px rgba(0,0,0,.7); pointer-events:none; white-space:nowrap; }
+  body.menu #place, body.menu #prompt { display:none !important; }
+
+  /* ---------- field guide card and journal ---------- */
+  #sheet { position:fixed; inset:0; display:none; align-items:center; justify-content:center; padding:18px; background:rgba(5,9,4,.55); }
+  #sheet.open { display:flex; }
+  .card { width:min(940px, 100%); max-height:min(92vh, 760px); overflow:hidden; display:grid; grid-template-columns: 42% 1fr; background:var(--paper); color:var(--text);
+    border-radius:14px; box-shadow:0 24px 80px rgba(0,0,0,.55); }
+  .card.list { display:block; width:min(560px, 100%); overflow-y:auto; padding:24px 26px; }
+  @media (max-width:760px) { .card { grid-template-columns:1fr; overflow-y:auto; } }
+  .pic { background:#1c2617; min-height:240px; position:relative; }
+  .pic img { width:100%; height:100%; object-fit:cover; display:block; position:absolute; inset:0; }
+  @media (max-width:760px) { .pic { height:240px; } }
+  .pic small { position:absolute; left:0; right:0; bottom:0; padding:22px 12px 8px; font:11.5px var(--sans); color:#e9efe0; background:linear-gradient(transparent, rgba(0,0,0,.7)); }
+  .pic small a { color:inherit; }
+  .pic .none { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; text-align:center; font:13px/1.5 var(--sans); color:#aeb9a2; }
+  .body { padding:24px 28px 22px; overflow-y:auto; }
+  .body h2 { font-weight:400; font-size:34px; line-height:1.1; margin:0; text-wrap:balance; }
+  .body .latin { font-style:italic; color:#5c6a4c; font-size:17px; margin:4px 0 12px; }
+  .chip { display:inline-block; font:600 12px var(--sans); padding:4px 10px; border-radius:999px; background:#dfe6cf; color:#33421f; }
+  .chip.cr { background:#f3cfc4; color:#7c2413; } .chip.en { background:#f6dcc0; color:#7a4310; } .chip.vu { background:#f4e7b6; color:#6a5207; }
+  .body h3 { font:600 12px var(--sans); letter-spacing:.08em; text-transform:uppercase; color:#6a7a58; margin:16px 0 3px; }
+  .body p { margin:0; font-size:16px; line-height:1.5; text-wrap:pretty; }
+  .foot { margin-top:18px; display:flex; gap:14px; align-items:center; justify-content:space-between; font:12.5px var(--sans); color:#6a7a58; }
+  .foot button, .card.list .close { background:#2c3d22; color:#f1f5e8; border:0; border-radius:999px; padding:9px 20px; font:600 14px var(--sans); }
+  .card.list h2 { font-weight:400; font-size:28px; margin:0 0 2px; } .card.list .sub { font:13px var(--sans); color:#6a7a58; margin:0 0 14px; }
+  .card.list ul { list-style:none; margin:0 0 18px; padding:0; }
+  .card.list li { display:flex; align-items:baseline; gap:10px; padding:10px 0; border-top:1px solid #ddd5bf; font-size:18px; }
+  .card.list li i { color:#6a7a58; font-size:14px; } .card.list li span { margin-left:auto; font:12.5px var(--sans); color:#6a7a58; text-align:right; }
+  .card.list li button { background:none; border:0; padding:0; font-size:18px; color:var(--text); text-decoration:underline; text-underline-offset:3px; }
+  .card.list li.unknown { color:#9a9a86; }
   @media (prefers-reduced-motion: reduce) { canvas#view, #enter, #bar i, #place { transition:none; } }
 </style>
 </head>
 <body class="menu">
 <canvas id="view"></canvas>
+
 <div id="menu">
-  <div class="card">
+  <div class="wrap">
     <h1>Deep <em>Forest</em></h1>
-    <p class="lede">A quiet walk among old trees. The foxes keep their distance, and the wild horses do not wait for anyone.</p>
-    <button id="enter" disabled>Growing the forest…</button>
+    <p class="lede">Jelajahi enam hutan di enam benua. Temukan papan pengamatan dan satwa yang hidup di sana, lalu buka catatan lengkap tentang tiap satwa.</p>
+    <div id="regions"></div>
+    <button id="enter" disabled>Menumbuhkan hutan…</button>
     <div id="bar"><i></i></div>
     <div id="fail"></div>
     <div class="row">Detail
       <span class="seg" id="quality">
-        <button data-q="low">Low</button><button data-q="medium">Medium</button><button data-q="high">High</button>
+        <button data-q="low">Rendah</button><button data-q="medium">Sedang</button><button data-q="high">Tinggi</button>
       </span>
     </div>
     <dl>
-      <dt>W A S D</dt><dd>walk</dd>
-      <dt>Mouse</dt><dd>look around</dd>
-      <dt>Shift</dt><dd>run</dd>
-      <dt>Space</dt><dd>hop</dd>
-      <dt>1 – 6</dt><dd>jump to a place</dd>
-      <dt>M · H · Esc</dt><dd>mute · stats · menu</dd>
+      <dt>W A S D</dt><dd>berjalan</dd><dt>Mouse</dt><dd>melihat</dd>
+      <dt>Shift</dt><dd>berlari</dd><dt>Spasi</dt><dd>melompat</dd>
+      <dt>E / klik</dt><dd>amati satwa</dd><dt>J</dt><dd>buku lapangan</dd>
+      <dt>1 – 6</dt><dd>pindah tempat</dd><dt>M · H · Esc</dt><dd>suara · statistik · menu</dd>
     </dl>
-    <p class="row touch">Hold to walk forward · slide to look · second finger to run</p>
-    <p id="note">Trees are grown in your browser with ez-tree by Daniel Greenheck (MIT), which also supplies the bark, leaf, ground, rock and grass textures. Animals: Fox (PixelMannen, tomkranis, CC0 / CC BY 4.0); Horse, Stork and Parrot (mirada / ro.me, via three.js).</p>
+    <p class="row touch">Tahan untuk berjalan maju · geser untuk melihat · jari kedua untuk berlari · ketuk nama satwa untuk mengamati</p>
+    <p id="note">Foto satwa dimuat langsung dari Wikipedia (perlu internet). Pohon ditumbuhkan dengan ez-tree oleh Daniel Greenheck (MIT), termasuk tekstur kulit kayu, daun, tanah, batu, dan rumput. Model 3D: Fox (PixelMannen, tomkranis, CC0 / CC BY 4.0); Horse, Stork, Parrot (mirada / ro.me, lewat three.js). Jenis pohon belum disesuaikan dengan tiap benua.</p>
   </div>
 </div>
+
+<div id="hud"><b id="hudRegion"></b> · Buku lapangan <span id="hudCount"></span></div>
+<div id="dot"></div>
+<div id="prompt"></div>
 <div id="stats"></div>
 <div id="place"></div>
+<div id="sheet" role="dialog" aria-modal="true"></div>
 <script type="module" src="/src/main.js"></script>
 </body>
 </html>
